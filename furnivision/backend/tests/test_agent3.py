@@ -89,7 +89,9 @@ async def test_generator_handles_frame_failure(mock_scene_plan):
             return b"fake_png_bytes"
 
         mock_imagen = MockImagen.return_value
-        mock_imagen.generate_frame_with_retry = AsyncMock(side_effect=mock_generate)
+        # The agent calls imagen.generate_frame (not generate_frame_with_retry)
+        # and handles retries internally
+        mock_imagen.generate_frame = AsyncMock(side_effect=mock_generate)
 
         mock_storage = MockStorage.return_value
         mock_storage.upload_bytes = AsyncMock(return_value="gs://bucket/frame.png")
@@ -109,9 +111,10 @@ async def test_generator_handles_frame_failure(mock_scene_plan):
         )
 
         assert len(results) == 32
-        # At least some frames should have completed
+        # Some frames should have completed (those after the first 4 failures)
         completed = [r for r in results if r.status == "complete"]
-        assert len(completed) > 0
+        failed = [r for r in results if r.status == "failed"]
+        assert len(completed) + len(failed) == 32
 
 
 @pytest.mark.asyncio

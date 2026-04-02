@@ -128,20 +128,20 @@ def test_room_pipeline_state_transitions():
 @pytest.mark.asyncio
 async def test_state_manager_in_memory_fallback():
     """Test that StateManager falls back to in-memory when Firestore unavailable."""
-    with patch("pipeline.state.firestore") as mock_firestore:
-        mock_firestore.AsyncClient.side_effect = Exception("No Firestore")
+    # Firestore is unavailable in this test environment, so StateManager
+    # should automatically fall back to in-memory store.
+    from pipeline.state import StateManager
 
-        from pipeline.state import StateManager
+    manager = StateManager()
+    assert manager._use_memory is True
 
-        manager = StateManager()
+    project = Project(
+        id="test_001",
+        name="Test",
+        status="uploading",
+    )
+    await manager.create_project(project)
+    retrieved = await manager.get_project("test_001")
 
-        project = Project(
-            id="test_001",
-            name="Test",
-            status="uploading",
-        )
-        await manager.create_project(project)
-        retrieved = await manager.get_project("test_001")
-
-        assert retrieved is not None
-        assert retrieved.id == "test_001"
+    assert retrieved is not None
+    assert retrieved.id == "test_001"

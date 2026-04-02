@@ -28,18 +28,28 @@ class StateManager:
     def __init__(self) -> None:
         self._db: Any = None
         self._use_memory = False
+
+        # Skip Firestore entirely when no GCP project is configured (local dev)
+        if not GOOGLE_CLOUD_PROJECT:
+            logger.warning(
+                "GOOGLE_CLOUD_PROJECT not set — using in-memory store. "
+                "This is acceptable for local development but MUST NOT be used in production."
+            )
+            self._use_memory = True
+            return
+
         try:
             from google.cloud.firestore_v1 import AsyncClient  # type: ignore[import-untyped]
 
             self._db = AsyncClient(
-                project=GOOGLE_CLOUD_PROJECT or None,
+                project=GOOGLE_CLOUD_PROJECT,
                 database=FIRESTORE_DATABASE,
             )
             logger.info(
                 "StateManager initialised with Firestore (database=%s)",
                 FIRESTORE_DATABASE,
             )
-        except Exception:
+        except BaseException:
             logger.warning(
                 "Firestore client unavailable — falling back to in-memory store. "
                 "This is acceptable for local development but MUST NOT be used in production."
