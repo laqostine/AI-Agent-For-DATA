@@ -1,0 +1,37 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.18
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-dotenv==1.0.1
+
+# Google AI
+google-generativeai==0.8.4
+google-cloud-storage==2.19.0
+google-cloud-firestore==2.20.0
+google-cloud-aiplatform==1.77.0
+
+# Celery + Redis
+celery[redis]==5.4.0
+redis==5.2.1
+
+# PDF Processing
+pdf2image==1.17.0
+PyMuPDF==1.25.3
+Pillow==11.1.0
+opencv-python-headless==4.10.0.84
+
+# Video
+ffmpeg-python==0.2.0
+
+# Reports
+reportlab==4.2.5
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.25.0
+httpx==0.28.1
+
+# Utilities
+numpy==2.2.1
+aiofiles==24.1.0

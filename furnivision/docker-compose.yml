@@ -1,0 +1,47 @@
+version: '3.9'
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - ./backend:/app
+      - /tmp/furnivision:/tmp/furnivision
+    depends_on:
+      - redis
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      - PYTHONPATH=/app
+
+  worker:
+    build: ./backend
+    env_file: .env
+    volumes:
+      - ./backend:/app
+      - /tmp/furnivision:/tmp/furnivision
+    depends_on:
+      - redis
+    command: celery -A pipeline.tasks worker --loglevel=info --concurrency=4
+    environment:
+      - PYTHONPATH=/app
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+    command: npm run dev -- --host
+    depends_on:
+      - backend
+
+volumes:
+  redis_data:
