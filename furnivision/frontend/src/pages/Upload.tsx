@@ -54,7 +54,7 @@ export default function Upload() {
     <div className="min-h-screen flex flex-col">
       {/* Header */}
       <header className="border-b border-white/[0.06] bg-surface-900/80 backdrop-blur-xl sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between">
           <div className="flex items-center gap-3.5">
             <img src="/cadre-logo.png" alt="CADRE" className="w-9 h-9 rounded-xl object-contain" />
             <div>
@@ -90,34 +90,34 @@ export default function Upload() {
       </header>
 
       {/* Main */}
-      <main className="flex-1 max-w-2xl mx-auto px-6 py-16 w-full">
+      <main className="flex-1 max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-16 w-full">
         {/* Demo banner in production */}
         {!(import.meta as any).env?.DEV && (
-          <div className="mb-10 card-glass p-5 flex items-center justify-between">
+          <div className="mb-8 sm:mb-10 card-glass p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <p className="text-sm font-medium text-white">Experience Cadre</p>
               <p className="text-xs text-gray-500 mt-0.5">Interactive demo with AI-generated renders from a Forthing dealership</p>
             </div>
-            <a href="/demo" className="btn-primary px-5 py-2.5 text-xs">
+            <a href="/demo" className="btn-primary px-5 py-2.5 text-xs text-center flex-shrink-0">
               View Demo
             </a>
           </div>
         )}
 
         {/* Hero */}
-        <div className="text-center mb-14">
-          <p className="text-label text-accent mb-4">Step 1 of 4</p>
-          <h2 className="heading-display text-4xl md:text-5xl leading-[1.1]">
+        <div className="text-center mb-8 sm:mb-14">
+          <p className="text-label text-accent mb-3 sm:mb-4">Step 1 of 4</p>
+          <h2 className="heading-display text-3xl sm:text-4xl md:text-5xl leading-[1.1]">
             Upload Your<br />Specification
           </h2>
-          <p className="text-gray-500 mt-4 text-base max-w-md mx-auto leading-relaxed">
+          <p className="text-gray-500 mt-3 sm:mt-4 text-sm sm:text-base max-w-md mx-auto leading-relaxed">
             Drop your PPTX furniture specification. AI will extract every room,
             product, and layout automatically.
           </p>
         </div>
 
         {/* Main dropzone card */}
-        <div className="card p-8 mb-6">
+        <div className="card p-5 sm:p-8 mb-6">
           <FileDropzone
             accept={{
               'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
@@ -160,7 +160,7 @@ export default function Upload() {
         </div>
 
         {/* Optional section */}
-        <div className="mb-10">
+        <div className="mb-8 sm:mb-10">
           <button
             className="flex items-center gap-2.5 text-gray-500 hover:text-gray-300 transition-colors group"
             onClick={() => setShowOptional(!showOptional)}
@@ -172,7 +172,7 @@ export default function Upload() {
             <span className="text-sm">Optional: Logo & background music</span>
           </button>
           {showOptional && (
-            <div className="mt-4 grid grid-cols-2 gap-4 animate-slide-up">
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 animate-slide-up">
               <div className="card p-5">
                 <FileDropzone
                   accept={{ 'image/*': ['.png', '.jpg', '.jpeg', '.svg'] }}
@@ -258,8 +258,8 @@ export default function Upload() {
         </button>
 
         {/* Forthing walkthrough video */}
-        <div className="mt-16 card overflow-hidden">
-          <div className="px-6 py-4 flex items-center justify-between border-b border-white/[0.04]">
+        <div className="mt-10 sm:mt-16 card overflow-hidden">
+          <div className="px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/[0.04]">
             <div>
               <p className="text-label mb-0.5">AI-Generated Output</p>
               <p className="text-[11px] text-gray-600">Forthing dealership — 13 rooms from a single PPTX</p>
@@ -284,9 +284,9 @@ export default function Upload() {
         </div>
 
         {/* How it works */}
-        <div className="mt-16 pt-10 border-t border-white/[0.04]">
-          <p className="text-center text-label text-gray-600 mb-8">How it works</p>
-          <div className="grid grid-cols-4 gap-6">
+        <div className="mt-10 sm:mt-16 pt-8 sm:pt-10 border-t border-white/[0.04]">
+          <p className="text-center text-label text-gray-600 mb-6 sm:mb-8">How it works</p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6">
             {STEPS.map((s) => (
               <div key={s.num} className="text-center group">
                 <div className="w-10 h-10 rounded-xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center mx-auto mb-3 group-hover:border-accent/20 group-hover:bg-accent/5 transition-all duration-300">

@@ -87,22 +87,22 @@ export default function VideoPreview() {
     <div className="min-h-screen">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-surface-950/80 backdrop-blur-xl border-b border-white/[0.06]">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-3">
+          <div className="min-w-0">
             <div className="flex items-center gap-2.5 mb-0.5">
-              <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-accent/15 text-accent text-[10px] font-bold border border-accent/20">4</span>
-              <h1 className="text-[15px] font-semibold text-white tracking-tight">Video Preview</h1>
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-accent/15 text-accent text-[10px] font-bold border border-accent/20 flex-shrink-0">4</span>
+              <h1 className="text-sm sm:text-[15px] font-semibold text-white tracking-tight">Video Preview</h1>
             </div>
             <p className="text-[11px] text-gray-600 ml-7.5">
-              {roomsWithVideo.length} of {rooms.length} room videos ready
+              {roomsWithVideo.length}/{rooms.length} videos ready
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-shrink-0">
             {!hasFinalVideo ? (
               <button
                 onClick={() => compileMutation.mutate()}
                 disabled={roomsWithVideo.length === 0 || compileMutation.isPending}
-                className="btn-primary flex items-center gap-2"
+                className="btn-primary flex items-center gap-2 text-xs sm:text-sm px-4 sm:px-6 py-2.5 sm:py-3"
               >
                 {compileMutation.isPending ? (
                   <><div className="w-4 h-4 border-2 border-surface-950/30 border-t-surface-950 rounded-full animate-spin" /> Compiling...</>
@@ -112,7 +112,7 @@ export default function VideoPreview() {
               <a
                 href={getFinalVideoUrl(projectId)}
                 download
-                className="btn-success flex items-center gap-2"
+                className="btn-success flex items-center gap-2 text-xs sm:text-sm px-4 sm:px-6 py-2.5 sm:py-3"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -124,7 +124,7 @@ export default function VideoPreview() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* Final Video Player */}
         {hasFinalVideo && (
           <div className="mb-10">
