@@ -51,21 +51,25 @@ export default function ExtractionReview() {
   // Loading state
   if (isExtracting || (!isReady && !extraction)) {
     return (
-      <div className="min-h-screen bg-surface-900 flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center max-w-sm">
-          <div className="relative mx-auto mb-8 w-24 h-24">
-            <div className="absolute inset-0 rounded-full border-[3px] border-surface-700" />
-            <div className="absolute inset-0 rounded-full border-[3px] border-accent border-t-transparent animate-spin" />
-            <div className="absolute inset-3 rounded-full border-[3px] border-purple-500/30 border-b-transparent animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }} />
-            <span className="absolute inset-0 flex items-center justify-center text-2xl">📄</span>
+          <div className="relative mx-auto mb-10 w-20 h-20">
+            <div className="absolute inset-0 rounded-full border border-white/[0.06]" />
+            <div className="absolute inset-0 rounded-full border border-accent/60 border-t-transparent animate-spin" />
+            <div className="absolute inset-2.5 rounded-full border border-accent/20 border-b-transparent animate-spin" style={{ animationDirection: 'reverse', animationDuration: '2s' }} />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <svg className="w-6 h-6 text-accent/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+              </svg>
+            </div>
           </div>
-          <h2 className="text-xl text-white font-bold mb-2">Analyzing Specification</h2>
-          <p className="text-gray-400 text-sm leading-relaxed">
-            AI is reading slides, extracting rooms, products, and floor plan layouts...
+          <h2 className="heading-display text-xl mb-2">Analyzing Specification</h2>
+          <p className="text-gray-500 text-sm leading-relaxed">
+            Extracting rooms, products, and floor plan layouts from your specification...
           </p>
-          <div className="mt-6 inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-surface-800 border border-surface-700">
+          <div className="mt-8 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/[0.03] border border-white/[0.06]">
             <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-            <span className="text-xs text-gray-400">Usually takes 30-60 seconds</span>
+            <span className="text-[11px] text-gray-500">Usually takes 30-60 seconds</span>
           </div>
         </div>
       </div>
@@ -74,12 +78,16 @@ export default function ExtractionReview() {
 
   if (project?.status === 'failed') {
     return (
-      <div className="min-h-screen bg-surface-900 flex items-center justify-center">
-        <div className="text-center card p-10 max-w-sm">
-          <div className="text-4xl mb-4">😔</div>
-          <h2 className="text-xl text-white font-bold mb-2">Extraction Failed</h2>
-          <p className="text-gray-400 text-sm mb-6">Something went wrong analyzing the PPTX.</p>
-          <button onClick={() => navigate('/')} className="btn-secondary">Try Again</button>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center card p-12 max-w-sm">
+          <div className="w-12 h-12 rounded-full bg-red-500/10 border border-red-500/15 flex items-center justify-center mx-auto mb-5">
+            <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+            </svg>
+          </div>
+          <h2 className="heading-display text-xl mb-2">Extraction Failed</h2>
+          <p className="text-gray-500 text-sm mb-8">Something went wrong analyzing the specification.</p>
+          <button onClick={() => navigate('/')} className="btn-secondary">Start Over</button>
         </div>
       </div>
     );
@@ -90,16 +98,16 @@ export default function ExtractionReview() {
   const totalProducts = extraction?.total_products ?? rooms.reduce((s, r) => s + r.products.length, 0);
 
   return (
-    <div className="min-h-screen bg-surface-900">
+    <div className="min-h-screen">
       {/* Sticky header */}
-      <header className="sticky top-0 z-40 bg-surface-900/80 backdrop-blur-md border-b border-gray-800/50">
+      <header className="sticky top-0 z-40 bg-surface-950/80 backdrop-blur-xl border-b border-white/[0.06]">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
-            <div className="flex items-center gap-2 mb-0.5">
+            <div className="flex items-center gap-2.5 mb-0.5">
               <StepBadge step={2} />
-              <h1 className="text-lg font-bold text-white">Review Extraction</h1>
+              <h1 className="text-[15px] font-semibold text-white tracking-tight">Review Extraction</h1>
             </div>
-            <p className="text-xs text-gray-500">
+            <p className="text-[11px] text-gray-600 ml-7.5">
               {rooms.length} rooms &middot; {totalProducts} products &middot; {floorPlans.length} floor plans
             </p>
           </div>
@@ -111,28 +119,33 @@ export default function ExtractionReview() {
             {approveMutation.isPending ? (
               <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Approving...</>
             ) : (
-              <>Approve All & Generate<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg></>
+              <>
+                Approve & Generate
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
+              </>
             )}
           </button>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-6">
+      <main className="max-w-7xl mx-auto px-6 py-8">
         {error && (
-          <div className="mb-4 p-3 rounded-lg bg-red-500/5 border border-red-500/20 text-red-400 text-sm">{error}</div>
+          <div className="mb-5 p-3.5 rounded-xl bg-red-500/5 border border-red-500/15 text-red-400 text-sm">{error}</div>
         )}
 
         {/* Floor Plans Row */}
         {floorPlans.length > 0 && (
-          <div className="mb-6">
-            <h2 className="text-xs uppercase tracking-widest text-gray-500 mb-3">Floor Plans</h2>
-            <div className="grid grid-cols-2 gap-3">
+          <div className="mb-8">
+            <h2 className="text-label mb-3">Floor Plans</h2>
+            <div className="grid grid-cols-2 gap-4">
               {floorPlans.map((fp) => (
-                <div key={fp.id} className="card overflow-hidden group hover:border-gray-600 transition-colors">
+                <div key={fp.id} className="card-hover overflow-hidden group">
                   <img src={getLocalFileUrl(fp.image_path)} alt={fp.floor_name}
-                    className="w-full h-40 object-contain bg-white/95 group-hover:scale-[1.02] transition-transform" />
-                  <div className="px-3 py-2 flex items-center gap-2">
-                    <span className="text-[10px] uppercase tracking-wider text-gray-500 font-medium">{fp.floor_name} floor</span>
+                    className="w-full h-40 object-contain bg-white/95 group-hover:scale-[1.02] transition-transform duration-500" />
+                  <div className="px-4 py-2.5">
+                    <span className="text-label">{fp.floor_name} floor</span>
                   </div>
                 </div>
               ))}
@@ -141,8 +154,8 @@ export default function ExtractionReview() {
         )}
 
         {/* Room Cards */}
-        <h2 className="text-xs uppercase tracking-widest text-gray-500 mb-3">Rooms</h2>
-        <div className="space-y-4">
+        <h2 className="text-label mb-4">Rooms</h2>
+        <div className="space-y-3">
           {rooms.map((room) => (
             <RoomCard key={room.id} room={room}
               isEditing={editingRoom === room.id} editLabel={editLabel}
@@ -159,7 +172,7 @@ export default function ExtractionReview() {
 
 function StepBadge({ step }: { step: number }) {
   return (
-    <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-accent/20 text-accent text-[10px] font-bold">
+    <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-accent/15 text-accent text-[10px] font-bold border border-accent/20">
       {step}
     </span>
   );
@@ -174,36 +187,38 @@ function RoomCard({ room, isEditing, editLabel, onStartEdit, onCancelEdit, onSav
   return (
     <div className="card overflow-hidden">
       {/* Header */}
-      <div className="px-5 py-3.5 flex items-center justify-between cursor-pointer hover:bg-surface-700/30 transition-colors"
+      <div className="px-5 py-4 flex items-center justify-between cursor-pointer hover:bg-white/[0.02] transition-colors duration-200"
         onClick={() => setExpanded(!expanded)}>
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center text-sm">
-            🏠
+        <div className="flex items-center gap-3.5">
+          <div className="w-9 h-9 rounded-xl bg-accent/8 border border-accent/10 flex items-center justify-center">
+            <svg className="w-4 h-4 text-accent/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+            </svg>
           </div>
           {isEditing ? (
             <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
               <input type="text" value={editLabel} onChange={(e) => onEditLabelChange(e.target.value)}
-                className="input-field py-1 px-2 text-sm w-48" autoFocus
+                className="input-field py-1.5 px-3 text-sm w-52" autoFocus
                 onKeyDown={(e) => { if (e.key === 'Enter') onSaveEdit(); if (e.key === 'Escape') onCancelEdit(); }} />
-              <button onClick={onSaveEdit} className="text-xs text-green-400 hover:text-green-300">Save</button>
-              <button onClick={onCancelEdit} className="text-xs text-gray-500 hover:text-gray-300">Cancel</button>
+              <button onClick={onSaveEdit} className="text-xs text-emerald-400 hover:text-emerald-300 font-medium">Save</button>
+              <button onClick={onCancelEdit} className="text-xs text-gray-600 hover:text-gray-400 font-medium">Cancel</button>
             </div>
           ) : (
             <div>
-              <h3 className="text-sm font-semibold text-white leading-tight">{room.label}</h3>
-              <p className="text-[11px] text-gray-500">{room.products.length} products &middot; {room.floor} floor</p>
+              <h3 className="text-sm font-semibold text-white leading-tight tracking-tight">{room.label}</h3>
+              <p className="text-[11px] text-gray-600 mt-0.5">{room.products.length} products &middot; {room.floor} floor</p>
             </div>
           )}
         </div>
         <div className="flex items-center gap-2">
           {!isEditing && (
             <button onClick={(e) => { e.stopPropagation(); onStartEdit(); }}
-              className="text-[11px] text-gray-500 hover:text-accent px-2 py-1 rounded hover:bg-accent/10 transition-colors">
+              className="text-[11px] text-gray-600 hover:text-accent px-2.5 py-1 rounded-lg hover:bg-accent/5 transition-all duration-200 font-medium">
               Rename
             </button>
           )}
-          <svg className={cn('w-4 h-4 text-gray-500 transition-transform', expanded && 'rotate-180')}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className={cn('w-4 h-4 text-gray-600 transition-transform duration-300', expanded && 'rotate-180')}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
         </div>
@@ -211,8 +226,8 @@ function RoomCard({ room, isEditing, editLabel, onStartEdit, onCancelEdit, onSav
 
       {/* Products */}
       {expanded && (
-        <div className="px-5 pb-4 pt-1 border-t border-gray-800/30">
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 mt-3">
+        <div className="px-5 pb-5 pt-1 border-t border-white/[0.04]">
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5 mt-3">
             {room.products.map((p) => (
               <ProductCard key={p.id} product={p} />
             ))}
@@ -225,18 +240,18 @@ function RoomCard({ room, isEditing, editLabel, onStartEdit, onCancelEdit, onSav
 
 function ProductCard({ product }: { product: V5Product }) {
   return (
-    <div className="group rounded-lg overflow-hidden bg-surface-900/50 border border-gray-700/30 hover:border-gray-600/50 transition-colors">
+    <div className="group rounded-xl overflow-hidden bg-white/[0.03] border border-white/[0.06] hover:border-white/[0.1] transition-all duration-300">
       {product.image_path ? (
         <img src={getLocalFileUrl(product.image_path)} alt={product.name}
-          className="w-full aspect-square object-contain bg-white p-0.5 group-hover:scale-105 transition-transform" />
+          className="w-full aspect-square object-contain bg-white p-1 group-hover:scale-105 transition-transform duration-500" />
       ) : (
         <div className="w-full aspect-square bg-surface-700 flex items-center justify-center">
-          <span className="text-gray-600 text-[10px]">No img</span>
+          <span className="text-gray-700 text-[9px]">No image</span>
         </div>
       )}
-      <div className="px-1.5 py-1">
-        <p className="text-[10px] text-gray-300 truncate leading-tight" title={product.name}>{product.name}</p>
-        {product.dimensions && <p className="text-[9px] text-gray-600 truncate">{product.dimensions}</p>}
+      <div className="px-2 py-1.5">
+        <p className="text-[10px] text-gray-400 truncate leading-tight" title={product.name}>{product.name}</p>
+        {product.dimensions && <p className="text-[9px] text-gray-700 truncate">{product.dimensions}</p>}
       </div>
     </div>
   );

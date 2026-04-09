@@ -36,11 +36,11 @@ export default function FileDropzone({
     <div
       {...getRootProps()}
       className={cn(
-        'relative flex flex-col items-center justify-center p-8 rounded-xl border-2 border-dashed cursor-pointer transition-all duration-200',
-        isDragActive && !isDragReject && 'border-accent bg-accent/10 scale-[1.02]',
-        isDragReject && 'border-danger bg-danger/10',
-        !isDragActive && !isDragReject && 'border-gray-600 hover:border-accent/50 hover:bg-surface-800/50',
-        disabled && 'opacity-50 cursor-not-allowed',
+        'relative flex flex-col items-center justify-center p-8 rounded-xl border border-dashed cursor-pointer transition-all duration-300',
+        isDragActive && !isDragReject && 'border-accent/50 bg-accent/[0.04] scale-[1.01]',
+        isDragReject && 'border-red-500/40 bg-red-500/[0.04]',
+        !isDragActive && !isDragReject && 'border-white/[0.1] hover:border-accent/30 hover:bg-accent/[0.02]',
+        disabled && 'opacity-40 cursor-not-allowed',
         className,
       )}
     >
@@ -48,14 +48,14 @@ export default function FileDropzone({
       <div className="flex flex-col items-center gap-3 text-center">
         <div className="text-gray-400">{icon}</div>
         <div>
-          <p className="text-lg font-semibold text-gray-200">{label}</p>
-          {sublabel && <p className="text-sm text-gray-500 mt-1">{sublabel}</p>}
+          <p className="text-sm font-medium text-gray-300">{label}</p>
+          {sublabel && <p className="text-xs text-gray-600 mt-1">{sublabel}</p>}
         </div>
         {isDragActive && !isDragReject && (
-          <p className="text-accent text-sm font-medium">Drop it here!</p>
+          <p className="text-accent text-xs font-medium">Release to upload</p>
         )}
         {isDragReject && (
-          <p className="text-danger text-sm font-medium">File type not accepted</p>
+          <p className="text-red-400 text-xs font-medium">Unsupported file type</p>
         )}
       </div>
     </div>

@@ -9,10 +9,6 @@ interface RegionSelectorProps {
   className?: string;
 }
 
-/**
- * Overlay on an image that lets users draw a rectangle to select a region.
- * Returns normalized coordinates (0-1 relative to image dimensions).
- */
 export default function RegionSelector({
   imageUrl,
   onRegionSelect,
@@ -61,7 +57,6 @@ export default function RegionSelector({
     const width = Math.abs(currentPos.x - startPos.x);
     const height = Math.abs(currentPos.y - startPos.y);
 
-    // Ignore tiny selections (accidental clicks)
     if (width < 0.03 || height < 0.03) {
       onRegionSelect(null);
       return;
@@ -70,7 +65,6 @@ export default function RegionSelector({
     onRegionSelect({ x, y, width, height });
   }, [isDrawing, startPos, currentPos, onRegionSelect]);
 
-  // Calculate the drawn rect for display
   const drawRect = isDrawing && startPos && currentPos ? {
     left: `${Math.min(startPos.x, currentPos.x) * 100}%`,
     top: `${Math.min(startPos.y, currentPos.y) * 100}%`,
@@ -86,20 +80,20 @@ export default function RegionSelector({
   return (
     <div className={className}>
       {/* Toggle button */}
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2.5">
         <button
           onClick={() => {
             setIsSelectMode(!isSelectMode);
             if (isSelectMode) { onRegionSelect(null); }
           }}
           className={cn(
-            'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all border',
+            'flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-200 border',
             isSelectMode
-              ? 'bg-accent/15 text-accent border-accent/30'
-              : 'bg-surface-700/50 text-gray-400 border-gray-700/50 hover:text-gray-200 hover:border-gray-600'
+              ? 'bg-accent/10 text-accent border-accent/20'
+              : 'bg-white/[0.04] text-gray-500 border-white/[0.08] hover:text-gray-300 hover:border-white/[0.12]'
           )}
         >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
           </svg>
           {isSelectMode ? 'Draw region to edit' : 'Select region'}
@@ -107,9 +101,9 @@ export default function RegionSelector({
         {selectedRegion && (
           <button
             onClick={() => onRegionSelect(null)}
-            className="text-[10px] text-gray-500 hover:text-red-400 transition-colors"
+            className="text-[10px] text-gray-600 hover:text-red-400 transition-colors"
           >
-            Clear selection
+            Clear
           </button>
         )}
       </div>
@@ -118,7 +112,7 @@ export default function RegionSelector({
       <div
         ref={containerRef}
         className={cn(
-          'relative rounded-lg overflow-hidden border border-gray-700/30',
+          'relative rounded-xl overflow-hidden border border-white/[0.06]',
           isSelectMode && 'cursor-crosshair'
         )}
         onMouseDown={handleStart}
@@ -131,24 +125,21 @@ export default function RegionSelector({
       >
         <img src={imageUrl} alt="" className="w-full select-none pointer-events-none" draggable={false} />
 
-        {/* Dimming overlay when region is selected */}
         {drawRect && (
-          <div className="absolute inset-0 bg-black/40 pointer-events-none" />
+          <div className="absolute inset-0 bg-black/50 pointer-events-none" />
         )}
 
-        {/* Selected region highlight */}
         {drawRect && (
           <div
-            className="absolute border-2 border-accent bg-accent/10 pointer-events-none"
+            className="absolute border border-accent bg-accent/10 pointer-events-none"
             style={{
               left: drawRect.left,
               top: drawRect.top,
               width: drawRect.width,
               height: drawRect.height,
-              boxShadow: '0 0 0 9999px rgba(0,0,0,0.4)',
+              boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)',
             }}
           >
-            {/* Corner handles */}
             <div className="absolute -top-1 -left-1 w-2 h-2 bg-accent rounded-full" />
             <div className="absolute -top-1 -right-1 w-2 h-2 bg-accent rounded-full" />
             <div className="absolute -bottom-1 -left-1 w-2 h-2 bg-accent rounded-full" />
@@ -156,10 +147,9 @@ export default function RegionSelector({
           </div>
         )}
 
-        {/* Hint text */}
         {isSelectMode && !drawRect && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <span className="text-xs text-white/60 bg-black/40 px-3 py-1.5 rounded-full backdrop-blur-sm">
+            <span className="text-xs text-white/50 bg-black/50 px-4 py-2 rounded-full backdrop-blur-sm">
               Click and drag to select a region
             </span>
           </div>
