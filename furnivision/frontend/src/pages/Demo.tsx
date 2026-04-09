@@ -40,14 +40,12 @@ export default function Demo() {
       <header className="border-b border-white/[0.06] bg-surface-900/80 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 flex-shrink-0">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-accent to-accent-dark flex items-center justify-center shadow-glow">
-              <span className="text-surface-950 font-bold text-[10px] tracking-tight">FV</span>
-            </div>
+            <img src="/cadre-logo.png" alt="CADRE" className="w-8 h-8 rounded-xl object-contain" />
             <div className="hidden sm:block">
-              <h1 className="text-sm font-semibold text-white leading-tight tracking-tight">FurniVision</h1>
+              <h1 className="text-sm font-semibold text-white leading-tight tracking-[0.15em] uppercase">Cadre</h1>
               <p className="text-[10px] text-gray-600 tracking-widest uppercase">Forthing Showroom</p>
             </div>
-            <h1 className="sm:hidden text-sm font-semibold text-white tracking-tight">FurniVision</h1>
+            <h1 className="sm:hidden text-sm font-semibold text-white tracking-[0.15em] uppercase">Cadre</h1>
           </div>
 
           {/* Tabs */}

@@ -56,12 +56,10 @@ export default function Upload() {
       <header className="border-b border-white/[0.06] bg-surface-900/80 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-accent to-accent-dark flex items-center justify-center shadow-glow">
-              <span className="text-surface-950 font-bold text-sm tracking-tight">FV</span>
-            </div>
+            <img src="/cadre-logo.png" alt="CADRE" className="w-9 h-9 rounded-xl object-contain" />
             <div>
-              <h1 className="text-[15px] font-semibold text-white tracking-tight leading-tight">FurniVision</h1>
-              <p className="text-[10px] text-gray-500 tracking-widest uppercase">AI Visualization</p>
+              <h1 className="text-[15px] font-semibold text-white tracking-[0.2em] leading-tight uppercase">Cadre</h1>
+              <p className="text-[10px] text-gray-500 tracking-widest uppercase">Interior Visualization</p>
             </div>
           </div>
           {/* Step indicator */}
@@ -97,7 +95,7 @@ export default function Upload() {
         {!(import.meta as any).env?.DEV && (
           <div className="mb-10 card-glass p-5 flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-white">Experience FurniVision</p>
+              <p className="text-sm font-medium text-white">Experience Cadre</p>
               <p className="text-xs text-gray-500 mt-0.5">Interactive demo with AI-generated renders from a Forthing dealership</p>
             </div>
             <a href="/demo" className="btn-primary px-5 py-2.5 text-xs">
