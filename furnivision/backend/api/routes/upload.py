@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
 
-from config import TEMP_DIR, GCS_PATH_FLOORPLAN, GCS_PATH_FURNITURE
+from config import TEMP_DIR, GCS_PATH_FLOORPLAN, GCS_PATH_FURNITURE, GCS_PATH_REFERENCE
 from pipeline.state import StateManager
 from services.storage import StorageService
 
@@ -223,3 +223,74 @@ async def upload_furniture(
     )
 
     return FurnitureUploadResponse(files=uploaded)
+
+
+class ReferenceUploadResponse(BaseModel):
+    files: list[FurnitureFileInfo]
+
+
+@router.post("/reference", response_model=ReferenceUploadResponse, status_code=201)
+async def upload_reference(
+    project_id: str,
+    files: list[UploadFile] = File(...),
+):
+    """Upload one or more reference render images (existing room visualizations).
+
+    These are used to anchor Imagen 4 and Veo 3 generation so outputs
+    match the actual room design intent — same proportions, furniture, materials.
+    """
+    try:
+        project = await _state.get_project(project_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    storage = _get_storage()
+    uploaded: list[FurnitureFileInfo] = []
+    reference_entries: list[dict] = list(project.reference_render_gcs_paths)
+
+    for upload_file in files:
+        content_type = upload_file.content_type or ""
+        if content_type not in _FURNITURE_CONTENT_TYPES:
+            logger.warning("Skipping unsupported reference file %s", upload_file.filename)
+            continue
+
+        item_id = str(uuid.uuid4())
+        original_name = upload_file.filename or f"reference_{item_id}.jpg"
+        ext = Path(original_name).suffix.lower() or ".jpg"
+
+        try:
+            contents = await upload_file.read()
+        except Exception:
+            logger.exception("Failed to read reference file %s", original_name)
+            continue
+
+        if not contents:
+            continue
+
+        gcs_path = GCS_PATH_REFERENCE.format(project_id=project_id, item_id=item_id)
+        if not gcs_path.endswith(ext):
+            gcs_path = gcs_path.rsplit(".", 1)[0] + ext
+
+        try:
+            await storage.upload_bytes(contents, gcs_path, content_type=content_type)
+        except Exception:
+            logger.exception("Storage upload failed for reference file %s", original_name)
+            continue
+
+        info = FurnitureFileInfo(file_id=item_id, filename=original_name, gcs_path=gcs_path)
+        uploaded.append(info)
+        reference_entries.append({"id": item_id, "filename": original_name, "gcs_path": gcs_path})
+
+    if not uploaded:
+        raise HTTPException(status_code=400, detail="No valid reference images uploaded")
+
+    try:
+        await _state.update_project(project_id, {"reference_render_gcs_paths": reference_entries})
+    except Exception:
+        logger.exception("Failed to update project with reference paths")
+
+    logger.info("Reference renders uploaded: project=%s count=%d", project_id, len(uploaded))
+    return ReferenceUploadResponse(files=uploaded)

@@ -32,5 +32,12 @@ export function useExtractionData(projectId: string | undefined) {
       return extraction;
     },
     enabled: !!projectId,
+    // Retry every 2s while extraction isn't ready yet (404 = still processing)
+    retry: (failureCount, error: unknown) => {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      if (status === 404) return failureCount < 30; // retry up to 60s
+      return failureCount < 2;
+    },
+    retryDelay: 2000,
   });
 }

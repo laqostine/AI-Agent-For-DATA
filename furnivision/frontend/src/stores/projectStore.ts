@@ -46,7 +46,7 @@ export const useProjectStore = create<ProjectStore>((set) => ({
     set({
       currentProject: project,
       rooms: project.rooms,
-      furniture: project.furniture,
+      furniture: project.furniture ?? [],
       brief: project.brief,
     }),
 

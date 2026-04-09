@@ -9,7 +9,6 @@ from pydantic import BaseModel
 from models.project import ProjectBrief, RoomGeometry, FurnitureItem
 from models.extraction import FurnitureAssignment
 from pipeline.state import StateManager
-from pipeline.tasks import run_pipeline_task, regenerate_room_task
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/projects/{project_id}", tags=["confirm"])
@@ -170,16 +169,27 @@ async def confirm_extraction(project_id: str, body: ConfirmExtractionRequest):
 
     # Trigger downstream pipeline (agents 2-5)
     job_id: str | None = None
-    try:
-        result = run_pipeline_task.delay(
-            project_id=project_id,
-            mode=body.mode,
-            target_room_id=target_room_id,
-        )
-        job_id = result.id
-    except Exception:
-        logger.exception("Failed to enqueue pipeline task after confirmation")
-        # Non-fatal -- user can manually trigger via /pipeline/start
+    from config import GOOGLE_CLOUD_PROJECT
+    if GOOGLE_CLOUD_PROJECT:
+        # Production: Celery
+        try:
+            from pipeline.tasks import run_pipeline_task
+            result = run_pipeline_task.delay(
+                project_id=project_id,
+                mode=body.mode,
+                target_room_id=target_room_id,
+            )
+            job_id = result.id
+        except Exception:
+            logger.exception("Failed to enqueue pipeline task after confirmation")
+    else:
+        # Local: the pipeline started at upload is already waiting at Gate 1.
+        # gate_1_confirmed was set above — it will wake up automatically.
+        try:
+            ps = await _state.get_pipeline_state(project_id)
+            job_id = ps.job_id
+        except Exception:
+            job_id = str(uuid.uuid4())
 
     logger.info(
         "Extraction confirmed for project %s: %d rooms, %d assignments, mode=%s",
@@ -289,6 +299,7 @@ async def reject_room(project_id: str, room_id: str, body: RoomRejectionRequest)
 
     # Trigger regeneration task
     try:
+        from pipeline.tasks import regenerate_room_task
         regenerate_room_task.delay(
             project_id=project_id,
             room_id=room_id,

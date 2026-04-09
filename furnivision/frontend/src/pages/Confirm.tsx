@@ -32,7 +32,7 @@ export default function Confirm() {
   const setJobId = usePipelineStore((s) => s.setJobId);
 
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
-  const [mode, setMode] = useState<'all' | 'single'>('all');
+  const [mode, setMode] = useState<'all_rooms' | 'single_room'>('all_rooms');
   const [singleRoomId, setSingleRoomId] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -87,7 +87,7 @@ export default function Confirm() {
       const { job_id } = await startPipeline({
         project_id: projectId,
         mode,
-        room_ids: mode === 'single' ? [singleRoomId] : undefined,
+        target_room_id: mode === 'single_room' ? singleRoomId : undefined,
       });
 
       setJobId(job_id, projectId);
@@ -215,28 +215,28 @@ export default function Confirm() {
               <button
                 className={cn(
                   'px-4 py-2 rounded-lg text-sm font-medium transition-all',
-                  mode === 'all'
+                  mode === 'all_rooms'
                     ? 'bg-accent text-white'
                     : 'bg-surface-900 text-gray-400 border border-gray-700 hover:border-gray-500',
                 )}
-                onClick={() => setMode('all')}
+                onClick={() => setMode('all_rooms')}
               >
                 All Rooms
               </button>
               <button
                 className={cn(
                   'px-4 py-2 rounded-lg text-sm font-medium transition-all',
-                  mode === 'single'
+                  mode === 'single_room'
                     ? 'bg-accent text-white'
                     : 'bg-surface-900 text-gray-400 border border-gray-700 hover:border-gray-500',
                 )}
-                onClick={() => setMode('single')}
+                onClick={() => setMode('single_room')}
               >
                 Single Room (test)
               </button>
             </div>
 
-            {mode === 'single' && (
+            {mode === 'single_room' && (
               <select
                 className="input-field w-auto"
                 value={singleRoomId}

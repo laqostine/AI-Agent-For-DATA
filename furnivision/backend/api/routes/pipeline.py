@@ -1,12 +1,14 @@
 """FurniVision AI -- Pipeline start and status routes."""
 
+import asyncio
 import logging
+import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
+from config import GOOGLE_CLOUD_PROJECT
 from pipeline.state import StateManager
-from pipeline.tasks import run_pipeline_task
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/projects/{project_id}/pipeline", tags=["pipeline"])
@@ -19,7 +21,7 @@ _state = StateManager()
 # ---------------------------------------------------------------------------
 
 class StartPipelineRequest(BaseModel):
-    mode: str = "single_room"  # "single_room" | "all_rooms"
+    mode: str = "all_rooms"  # "single_room" | "all_rooms"
     target_room_id: str | None = None
 
 
@@ -44,16 +46,42 @@ class PipelineStatusResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _is_dev_mode() -> bool:
+    from config import GOOGLE_API_KEY
+    return not GOOGLE_API_KEY
+
+
+async def _run_pipeline_bg(project_id: str, mode: str, target_room_id: str | None) -> None:
+    """Run the pipeline as a background task. Uses local mock when no API key."""
+    try:
+        if _is_dev_mode():
+            from pipeline.mock_pipeline import run_local_pipeline
+            await run_local_pipeline(project_id, mode, target_room_id)
+        else:
+            logger.info("Real pipeline starting: project=%s mode=%s", project_id, mode)
+            from pipeline.orchestrator import PipelineOrchestrator
+            orchestrator = PipelineOrchestrator()
+            if mode == "all_rooms":
+                await orchestrator.run_full_pipeline(project_id)
+            else:
+                await orchestrator.run_single_room(project_id, target_room_id)
+    except Exception:
+        logger.exception("Background pipeline failed: project=%s", project_id)
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
 @router.post("/start", response_model=StartPipelineResponse, status_code=202)
-async def start_pipeline(project_id: str, body: StartPipelineRequest):
-    """Start the pipeline as a background Celery task.
+async def start_pipeline(project_id: str, body: StartPipelineRequest, background_tasks: BackgroundTasks):
+    """Start the pipeline as a background task.
 
-    Modes:
-        - ``single_room``: requires ``target_room_id`` in the body.
-        - ``all_rooms``: runs the full pipeline with human gates.
+    In dev mode (no GCP project) runs inline via asyncio BackgroundTasks.
+    In production runs via Celery.
     """
     # Validate project
     try:
@@ -73,7 +101,6 @@ async def start_pipeline(project_id: str, body: StartPipelineRequest):
             detail="target_room_id is required when mode is 'single_room'",
         )
 
-    # Validate that the target room exists (if specified)
     if body.target_room_id:
         room_ids = {r.id for r in project.rooms}
         if body.target_room_id not in room_ids:
@@ -82,24 +109,28 @@ async def start_pipeline(project_id: str, body: StartPipelineRequest):
                 detail=f"Room {body.target_room_id} not found in project {project_id}",
             )
 
-    # Dispatch Celery task
-    try:
-        result = run_pipeline_task.delay(
-            project_id=project_id,
-            mode=body.mode,
-            target_room_id=body.target_room_id,
-        )
-        job_id = result.id
-    except Exception:
-        logger.exception("Failed to enqueue pipeline task for project %s", project_id)
-        raise HTTPException(status_code=500, detail="Failed to start pipeline task")
+    job_id = str(uuid.uuid4())
 
-    logger.info(
-        "Pipeline task enqueued: project=%s mode=%s job=%s",
-        project_id,
-        body.mode,
-        job_id,
-    )
+    from config import GOOGLE_CLOUD_PROJECT
+    if GOOGLE_CLOUD_PROJECT:
+        # Production: use Celery
+        from pipeline.tasks import run_pipeline_task
+        try:
+            result = run_pipeline_task.delay(
+                project_id=project_id,
+                mode=body.mode,
+                target_room_id=body.target_room_id,
+            )
+            job_id = result.id
+        except Exception:
+            logger.exception("Failed to enqueue pipeline task for project %s", project_id)
+            raise HTTPException(status_code=500, detail="Failed to start pipeline task")
+    else:
+        # Local: run in-process background task (mock or real Gemini/Imagen)
+        background_tasks.add_task(_run_pipeline_bg, project_id, body.mode, body.target_room_id)
+        logger.info("Pipeline started (local background): project=%s mode=%s job=%s", project_id, body.mode, job_id)
+
+    logger.info("Pipeline task enqueued: project=%s mode=%s job=%s", project_id, body.mode, job_id)
 
     return StartPipelineResponse(
         job_id=job_id,
@@ -111,7 +142,7 @@ async def start_pipeline(project_id: str, body: StartPipelineRequest):
 
 @router.get("/status", response_model=PipelineStatusResponse)
 async def get_pipeline_status(project_id: str):
-    """Return the full pipeline state from Firestore."""
+    """Return the full pipeline state."""
     try:
         ps = await _state.get_pipeline_state(project_id)
     except ValueError:

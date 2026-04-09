@@ -11,7 +11,7 @@ export default function Processing() {
   const navigate = useNavigate();
 
   const { jobId, stage, status, rooms, progress } = usePipelineStore();
-  const { data: pipelineState } = useJobStatus(jobId);
+  const { data: pipelineState } = useJobStatus(projectId ?? null);
 
   // Auto-navigate on completion
   useEffect(() => {

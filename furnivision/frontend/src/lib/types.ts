@@ -49,7 +49,7 @@ export interface Project {
   status: 'created' | 'uploading' | 'extracting' | 'confirmed' | 'processing' | 'reviewing' | 'completed';
   brief: ProjectBrief;
   rooms: Room[];
-  furniture: FurnitureItem[];
+  furniture?: FurnitureItem[];
   floorplan_url?: string;
   created_at: string;
   updated_at: string;
@@ -137,6 +137,74 @@ export interface ViewerManifest {
   frames: FrameManifest[];
 }
 
+// ---- V5 Human-in-the-Loop Models ----
+
+export interface V5Product {
+  id: string;
+  name: string;
+  dimensions: string;
+  image_path: string;
+  room_id: string;
+  slide_index?: number;
+  notes?: string;
+}
+
+export interface V5GeneratedImage {
+  id: string;
+  room_id: string;
+  image_path: string;
+  prompt_used: string;
+  version: number;
+  type: 'base' | 'refined' | 'edited';
+  created_at?: string;
+}
+
+export interface V5FloorPlan {
+  id: string;
+  floor_name: string;
+  image_path: string;
+}
+
+export type V5RoomStatus = 'pending' | 'extracted' | 'approved' | 'generating' | 'image_ready'
+  | 'image_approved' | 'video_ready' | 'complete' | 'generation_failed' | 'video_failed';
+
+export type V5ProjectStatus = 'uploading' | 'extracting' | 'reviewing_extraction'
+  | 'generating_images' | 'reviewing_images' | 'generating_videos' | 'complete' | 'failed';
+
+export interface V5Room {
+  id: string;
+  label: string;
+  floor: string;
+  status: V5RoomStatus;
+  layout_image_path: string;
+  products: V5Product[];
+  generated_images: V5GeneratedImage[];
+  video_path: string | null;
+  feedback: string[];
+}
+
+export interface V5Project {
+  id: string;
+  name: string;
+  status: V5ProjectStatus;
+  spec_file_path: string;
+  floor_plans: V5FloorPlan[];
+  v5_rooms: V5Room[];
+  logo_path: string | null;
+  music_path: string | null;
+  final_video_path: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface V5ExtractionResponse {
+  project_id: string;
+  status: string;
+  rooms: V5Room[];
+  floor_plans: V5FloorPlan[];
+  total_products: number;
+}
+
 // ---- API Response Types ----
 
 export interface ApiResponse<T> {
@@ -161,12 +229,15 @@ export interface CreateProjectResponse {
 export interface StartPipelineRequest {
   project_id: string;
   room_ids?: string[];
-  mode: 'single' | 'all';
+  mode: 'single_room' | 'all_rooms';
+  target_room_id?: string;
 }
 
 export interface StartPipelineResponse {
   job_id: string;
-  estimated_time: number;
+  project_id: string;
+  mode: string;
+  message: string;
 }
 
 export interface ConfirmExtractionRequest {

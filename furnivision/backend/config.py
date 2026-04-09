@@ -11,6 +11,9 @@ load_dotenv()
 
 # Google AI
 GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
+
+# fal.ai (video generation fallback — Kling image-to-video)
+FAL_KEY: str = os.getenv("FAL_KEY", "")
 GOOGLE_CLOUD_PROJECT: str = os.getenv("GOOGLE_CLOUD_PROJECT", "")
 GOOGLE_CLOUD_LOCATION: str = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
 VERTEX_AI_ENABLED: bool = os.getenv("VERTEX_AI_ENABLED", "false").lower() == "true"
@@ -38,7 +41,7 @@ HUMAN_GATE_TIMEOUT_HOURS: int = int(os.getenv("HUMAN_GATE_TIMEOUT_HOURS", "48"))
 API_BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8000")
 FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
 CORS_ORIGINS: list[str] = json.loads(
-    os.getenv("CORS_ORIGINS", '["http://localhost:5173"]')
+    os.getenv("CORS_ORIGINS", '["http://localhost:5173","https://frontend-three-nu-41.vercel.app"]')
 )
 SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-change-in-production")
 
@@ -50,6 +53,7 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 GCS_PATH_UPLOADS = "projects/{project_id}/uploads"
 GCS_PATH_FLOORPLAN = "projects/{project_id}/uploads/floorplan.pdf"
 GCS_PATH_FURNITURE = "projects/{project_id}/uploads/furniture/{item_id}.png"
+GCS_PATH_REFERENCE = "projects/{project_id}/uploads/reference/{item_id}.jpg"
 GCS_PATH_FRAMES_RAW = "projects/{project_id}/rooms/{room_id}/frames/raw/frame_{n:03d}.png"
 GCS_PATH_FRAMES_GRADED = "projects/{project_id}/rooms/{room_id}/frames/graded/frame_{n:03d}.png"
 GCS_PATH_VIDEO = "projects/{project_id}/rooms/{room_id}/video/room.mp4"

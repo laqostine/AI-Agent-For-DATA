@@ -1,10 +1,15 @@
-"""FurniVision AI — Agent 5: Animator — Video assembly and viewer manifest."""
+"""FurniVision AI — Agent 5: Animator — video generation + viewer manifest.
+
+Video generation priority:
+  1. fal.ai Kling v2.1 image-to-video  (primary — high rate limits)
+  2. Veo 3 Fast                         (fallback if fal.ai unavailable)
+  3. ffmpeg slideshow                   (last resort)
+"""
 
 import asyncio
 import json
 import logging
 import os
-import tempfile
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -13,11 +18,9 @@ from models.pipeline import FrameStatus
 from services.storage import StorageService
 from services.veo import VeoService, VeoError
 from config import (
-    GCS_PATH_FRAMES_GRADED,
+    FAL_KEY,
     GCS_PATH_VIDEO,
-    GCS_PATH_HLS,
     GCS_PATH_VIEWER_MANIFEST,
-    GCS_PATH_MASTER_VIDEO,
     TEMP_DIR,
 )
 
@@ -36,6 +39,7 @@ class AnimationResult(BaseModel):
     video_url: str
     hls_url: str | None = None
     viewer_manifest_url: str
+    preview_url: str | None = None
     master_video_url: str | None = None
 
 
@@ -45,7 +49,7 @@ class AnimationResult(BaseModel):
 
 
 class AnimatorAgent:
-    """Agent 5 — assembles graded frames into video, HLS, and viewer data."""
+    """Agent 5 — generates room walkthrough video via Veo 3."""
 
     def __init__(self) -> None:
         self.veo = VeoService()
@@ -62,412 +66,218 @@ class AnimatorAgent:
         project_id: str,
         room_id: str,
         all_rooms_complete: bool = False,
+        reference_images: list[bytes] | None = None,
     ) -> AnimationResult:
-        """Assemble validated frames into a video and build viewer data.
+        """Generate a Veo 3 room-walkthrough video using keyframe + prompt.
 
         Steps
         -----
-        1. Download graded frames from GCS ordered 000-031.
-        2. Attempt Veo 3 API; fallback to ffmpeg (4fps in -> 24fps out).
-        3. Upload video to GCS.
-        4. Generate HLS segments.
-        5. Build viewer_manifest.json with frame URLs, camera positions, types.
-        6. Save manifest to GCS.
-        7. If all_rooms_complete: build master multi-room video.
-        8. Return AnimationResult.
+        1. Download the wide-shot keyframe (frame 0) from storage.
+        2. Build a cinematic prompt from the scene plan.
+        3. Call Veo 3 to generate an 8-second video.
+        4. Upload video to storage.
+        5. Build viewer_manifest.json.
+        6. Return AnimationResult.
         """
         logger.info(
-            "AnimatorAgent.animate — project=%s, room=%s, frames=%d, all_rooms=%s",
-            project_id, room_id, len(validated_frames), all_rooms_complete,
+            "AnimatorAgent.animate — project=%s, room=%s, frames=%d",
+            project_id, room_id, len(validated_frames),
         )
 
-        # ------------------------------------------------------------------
-        # 1. Download graded frames from GCS ordered 000-031
-        # ------------------------------------------------------------------
-        completed = [
-            f for f in validated_frames
-            if f.status == "complete"
-        ]
+        completed = [f for f in validated_frames if f.status == "complete"]
         completed.sort(key=lambda f: f.frame_idx)
 
-        if not completed:
-            logger.error("No completed frames to animate for room %s", room_id)
-            raise VeoError(f"No completed frames available for room {room_id}")
+        # ------------------------------------------------------------------
+        # 1. Resolve start frame (keyframe 0) and end frame (keyframe 1)
+        #    Start frame priority: uploaded reference render > keyframe 0
+        #    End frame: always keyframe 1 (the second generated shot)
+        # ------------------------------------------------------------------
+        reference_image: bytes | None = None   # start frame for Veo fallback
+        start_frame:     bytes | None = None   # start frame for Kling
+        end_frame:       bytes | None = None   # end frame for Kling (keyframe 1)
 
-        # Create a temp directory for this room's frames
-        work_dir = os.path.join(str(TEMP_DIR), project_id, room_id, "animation")
-        os.makedirs(work_dir, exist_ok=True)
-
-        logger.info("Downloading %d graded frames to %s", len(completed), work_dir)
-        local_frame_paths: list[str] = []
-        download_tasks = []
-
-        for fs in completed:
-            graded_gcs_path = GCS_PATH_FRAMES_GRADED.format(
-                project_id=project_id, room_id=room_id, n=fs.frame_idx
-            )
-            local_path = os.path.join(work_dir, f"frame_{fs.frame_idx:03d}.png")
-            download_tasks.append(
-                self._download_frame_to_file(graded_gcs_path, local_path, fs.frame_idx)
-            )
-
-        download_results = await asyncio.gather(*download_tasks, return_exceptions=True)
-
-        for fs, result in zip(completed, download_results):
-            if isinstance(result, Exception):
-                logger.warning(
-                    "Failed to download graded frame %d: %s — trying raw frame",
-                    fs.frame_idx, result,
+        # Download generated keyframes so we can use them as start/end
+        if len(completed) >= 2:
+            try:
+                start_frame = await self.storage.download_bytes(completed[0].gcs_url)
+                end_frame   = await self.storage.download_bytes(completed[1].gcs_url)
+                logger.info(
+                    "Loaded keyframe start=%d bytes, end=%d bytes",
+                    len(start_frame), len(end_frame),
                 )
-                # Fallback: try to download the raw frame if graded is missing
-                if fs.gcs_url:
-                    local_path = os.path.join(work_dir, f"frame_{fs.frame_idx:03d}.png")
-                    try:
-                        await self.storage.download_file(fs.gcs_url, local_path)
-                        local_frame_paths.append(local_path)
-                    except Exception as exc2:
-                        logger.error(
-                            "Could not download raw frame %d either: %s",
-                            fs.frame_idx, exc2,
-                        )
-            else:
-                local_frame_paths.append(result)
+            except Exception as exc:
+                logger.warning("Could not download keyframes: %s", exc)
+        elif len(completed) == 1:
+            try:
+                start_frame = await self.storage.download_bytes(completed[0].gcs_url)
+            except Exception as exc:
+                logger.warning("Could not download keyframe 0: %s", exc)
 
-        local_frame_paths.sort()
-
-        if not local_frame_paths:
-            raise VeoError(f"Could not download any frames for room {room_id}")
-
-        logger.info("Downloaded %d frames locally", len(local_frame_paths))
-
-        # ------------------------------------------------------------------
-        # 2. Attempt Veo 3 API, fallback to ffmpeg (4fps -> 24fps)
-        # ------------------------------------------------------------------
-        video_local_path = os.path.join(work_dir, "room.mp4")
-
-        # Build motion descriptors from scene plan for Veo
-        motion_descriptors = self._build_motion_descriptors(scene_plan, completed)
-
-        logger.info("Generating video from %d frames", len(local_frame_paths))
-        video_path = await self.veo.generate_video_from_frames(
-            frame_paths=local_frame_paths,
-            motion_descriptors=motion_descriptors,
-            output_path=video_local_path,
-            input_fps=4,
-            output_fps=24,
-        )
-        logger.info("Video generated at %s", video_path)
-
-        # ------------------------------------------------------------------
-        # 3. Upload video to GCS
-        # ------------------------------------------------------------------
-        video_gcs_path = GCS_PATH_VIDEO.format(
-            project_id=project_id, room_id=room_id
-        )
-        await self.storage.upload_file(video_path, video_gcs_path)
-        video_url = self.storage.get_signed_url(video_gcs_path)
-        logger.info("Video uploaded -> %s", video_gcs_path)
-
-        # ------------------------------------------------------------------
-        # 4. Generate HLS segments
-        # ------------------------------------------------------------------
-        hls_url: str | None = None
-        hls_dir = os.path.join(work_dir, "hls")
-
-        try:
-            hls_playlist_path = self.veo._generate_hls(video_path, hls_dir)
-            logger.info("HLS generated at %s", hls_playlist_path)
-
-            # Upload all HLS files to GCS
-            hls_gcs_prefix = GCS_PATH_HLS.format(
-                project_id=project_id, room_id=room_id
-            ).rsplit("/", 1)[0]  # Get the directory portion
-
-            hls_files = list(Path(hls_dir).glob("*"))
-            for hls_file in hls_files:
-                hls_gcs_path = f"{hls_gcs_prefix}/{hls_file.name}"
-                await self.storage.upload_file(str(hls_file), hls_gcs_path)
-
-            # The main playlist URL
-            hls_playlist_gcs = GCS_PATH_HLS.format(
-                project_id=project_id, room_id=room_id
+        # If a reference render was uploaded, use it as the start frame
+        # (it's a higher-fidelity view of the actual room)
+        if reference_images:
+            start_frame     = reference_images[0]
+            reference_image = reference_images[0]
+            logger.info(
+                "Using uploaded reference render as start frame (%d bytes)",
+                len(start_frame),
             )
-            hls_url = self.storage.get_signed_url(hls_playlist_gcs)
-            logger.info("HLS uploaded, playlist -> %s", hls_playlist_gcs)
-
-        except Exception as exc:
-            logger.warning("HLS generation failed: %s — skipping", exc)
-            hls_url = None
+        elif start_frame:
+            reference_image = start_frame
 
         # ------------------------------------------------------------------
-        # 5. Build viewer_manifest.json
+        # 2. Build cinematic Veo prompt (include furniture if available)
         # ------------------------------------------------------------------
-        viewer_manifest = self._build_viewer_manifest(
-            scene_plan=scene_plan,
-            completed_frames=completed,
-            project_id=project_id,
-            room_id=room_id,
-            video_url=video_url,
+        room_label = getattr(scene_plan.room, "label", "room")
+        style = getattr(scene_plan, "style_anchor", "modern interior")
+
+        # Include furniture layout in the prompt
+        furniture_desc = ""
+        layout = getattr(scene_plan, "furniture_layout", [])
+        if layout:
+            items = [item.get("item_name", item.get("item_id", "")) for item in layout[:6]]
+            items = [i for i in items if i]
+            if items:
+                furniture_desc = f"Furnished with: {', '.join(items)}. "
+
+        if reference_images:
+            veo_prompt = (
+                f"Slow gentle dolly shot inside a {room_label}. "
+                f"{furniture_desc}"
+                f"Camera glides forward very slowly, barely moving, revealing the room depth. "
+                f"Exactly the same room, same furniture, same materials, same lighting throughout. "
+                f"V-Ray architectural visualization quality, photorealistic 4K, no people."
+            )
+        else:
+            veo_prompt = (
+                f"Slow gentle dolly shot inside a {room_label}. "
+                f"{furniture_desc}"
+                f"Style: {style[:120]}. "
+                f"Camera glides forward slowly revealing the space. "
+                f"Photorealistic 4K architectural visualization, no people."
+            )
+
+        # ------------------------------------------------------------------
+        # 3. Generate video — fal.ai Kling (primary) → Veo 3 → ffmpeg
+        # ------------------------------------------------------------------
+        work_dir = os.path.join(str(TEMP_DIR), project_id, room_id, "video")
+        os.makedirs(work_dir, exist_ok=True)
+        video_local_path = os.path.join(work_dir, "room_video.mp4")
+
+        video_bytes: bytes | None = None
+
+        # --- 3a. fal.ai Kling (primary) — start frame + end frame arc ---
+        if FAL_KEY and start_frame:
+            try:
+                from services.fal_video import FalVideoService
+                fal = FalVideoService()
+                video_bytes = await fal.generate_video(
+                    start_frame_bytes=start_frame,
+                    prompt=veo_prompt,
+                    end_frame_bytes=end_frame,   # keyframe 1 → camera arc
+                    max_duration_seconds=7,
+                    aspect_ratio="16:9",
+                )
+                Path(video_local_path).write_bytes(video_bytes)
+                logger.info(
+                    "Kling video generated: %d bytes (start+end frame mode=%s)",
+                    len(video_bytes), end_frame is not None,
+                )
+            except Exception as exc:
+                logger.warning("Kling (fal.ai) failed: %s — trying Veo 3", exc)
+                video_bytes = None
+
+        # --- 3b. Veo 3 (fallback) ---
+        if not video_bytes:
+            try:
+                video_bytes = await self.veo.generate_video_from_prompt(
+                    prompt=veo_prompt,
+                    reference_image_bytes=reference_image,
+                    output_path=video_local_path,
+                    duration_seconds=8,
+                    aspect_ratio="16:9",
+                )
+                logger.info("Veo 3 video generated: %d bytes", len(video_bytes))
+            except Exception as exc:
+                logger.warning("Veo 3 failed: %s — falling back to ffmpeg", exc)
+                video_bytes = None
+
+        # --- 3c. ffmpeg slideshow (last resort) ---
+        if not video_bytes:
+            frame_paths = []
+            for fs in completed:
+                if not fs.gcs_url:
+                    continue
+                local_p = os.path.join(work_dir, f"frame_{fs.frame_idx:03d}.png")
+                try:
+                    await self.storage.download_file(fs.gcs_url, local_p)
+                    frame_paths.append(local_p)
+                except Exception as dl_exc:
+                    logger.warning("Could not download frame %d: %s", fs.frame_idx, dl_exc)
+            if not frame_paths and reference_image:
+                tmp_img = os.path.join(work_dir, "ref_frame.png")
+                Path(tmp_img).write_bytes(reference_image)
+                frame_paths = [tmp_img] * 4
+            if frame_paths:
+                logger.info("ffmpeg fallback with %d frames", len(frame_paths))
+                await self.veo.generate_video_from_frames(
+                    frame_paths=frame_paths,
+                    motion_descriptors=[],
+                    output_path=video_local_path,
+                )
+                video_bytes = Path(video_local_path).read_bytes()
+            else:
+                raise VeoError("No frames or reference image available for video generation")
+
+        # ------------------------------------------------------------------
+        # 4. Upload video to storage
+        # ------------------------------------------------------------------
+        video_gcs_path = GCS_PATH_VIDEO.format(project_id=project_id, room_id=room_id)
+        await self.storage.upload_bytes(
+            data=video_bytes,
+            gcs_path=video_gcs_path,
+            content_type="video/mp4",
         )
-
-        manifest_local_path = os.path.join(work_dir, "viewer_manifest.json")
-        with open(manifest_local_path, "w") as f:
-            json.dump(viewer_manifest, f, indent=2)
-
-        logger.info("Viewer manifest built with %d frames", len(viewer_manifest.get("frames", [])))
+        video_url = self.storage.get_signed_url(video_gcs_path)
+        logger.info("Video uploaded -> %s", video_url[:100])
 
         # ------------------------------------------------------------------
-        # 6. Save manifest to GCS
+        # 5. Build viewer manifest
         # ------------------------------------------------------------------
+        manifest = {
+            "room_id": room_id,
+            "project_id": project_id,
+            "video_url": video_url,
+            "keyframes": [
+                {
+                    "frame_idx": fs.frame_idx,
+                    "url": self.storage.get_signed_url(fs.gcs_url) if fs.gcs_url else None,
+                    "frame_type": fs.frame_type,
+                }
+                for fs in completed
+            ],
+            "camera_positions": [
+                cp.model_dump() for cp in scene_plan.camera_positions[:2]
+            ],
+            "style_anchor": style[:300],
+        }
+
         manifest_gcs_path = GCS_PATH_VIEWER_MANIFEST.format(
             project_id=project_id, room_id=room_id
         )
-        manifest_bytes = json.dumps(viewer_manifest, indent=2).encode("utf-8")
         await self.storage.upload_bytes(
-            data=manifest_bytes,
+            data=json.dumps(manifest, indent=2).encode(),
             gcs_path=manifest_gcs_path,
             content_type="application/json",
         )
-        viewer_manifest_url = self.storage.get_signed_url(manifest_gcs_path)
-        logger.info("Viewer manifest uploaded -> %s", manifest_gcs_path)
+        manifest_url = self.storage.get_signed_url(manifest_gcs_path)
 
-        # ------------------------------------------------------------------
-        # 7. If all_rooms_complete: build master multi-room video
-        # ------------------------------------------------------------------
-        master_video_url: str | None = None
+        logger.info("AnimatorAgent complete for room %s — video=%s", room_id, video_url[:80])
 
-        if all_rooms_complete:
-            try:
-                master_video_url = await self._build_master_video(
-                    project_id=project_id,
-                    current_room_video_path=video_path,
-                )
-                logger.info("Master video assembled -> %s", master_video_url)
-            except Exception as exc:
-                logger.warning("Master video assembly failed: %s", exc)
-                master_video_url = None
-
-        # ------------------------------------------------------------------
-        # 8. Return AnimationResult
-        # ------------------------------------------------------------------
-        result = AnimationResult(
+        return AnimationResult(
             room_id=room_id,
             video_url=video_url,
-            hls_url=hls_url,
-            viewer_manifest_url=viewer_manifest_url,
-            master_video_url=master_video_url,
+            hls_url=None,
+            viewer_manifest_url=manifest_url,
+            preview_url=self.storage.get_signed_url(completed[0].gcs_url) if completed else None,
         )
-
-        logger.info(
-            "Animation complete — room=%s, video=%s, hls=%s, manifest=%s",
-            room_id,
-            video_url[:80] if video_url else "none",
-            "yes" if hls_url else "no",
-            viewer_manifest_url[:80] if viewer_manifest_url else "none",
-        )
-
-        return result
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    async def _download_frame_to_file(
-        self, gcs_path: str, local_path: str, frame_idx: int
-    ) -> str:
-        """Download a single frame from GCS to a local file path."""
-        await self.storage.download_file(gcs_path, local_path)
-        return local_path
-
-    def _build_motion_descriptors(
-        self,
-        scene_plan,
-        completed_frames: list[FrameStatus],
-    ) -> list[str]:
-        """Build motion descriptor strings for Veo from the scene plan.
-
-        Each descriptor explains the camera movement between consecutive frames.
-        """
-        descriptors: list[str] = []
-        num_cameras = len(scene_plan.camera_positions)
-
-        for i, fs in enumerate(completed_frames):
-            frame_idx = fs.frame_idx
-            camera_idx = frame_idx // 4 if num_cameras > 0 else 0
-            local_idx = frame_idx % 4
-
-            if camera_idx < num_cameras:
-                camera = scene_plan.camera_positions[camera_idx]
-                desc = camera.look_at_description
-            else:
-                desc = "room interior"
-
-            if local_idx == 0:
-                descriptors.append(f"Cut to new angle: {desc}")
-            else:
-                fraction = local_idx / 4
-                descriptors.append(
-                    f"Smooth dolly transition ({fraction:.0%} progress) "
-                    f"toward {desc}"
-                )
-
-        return descriptors
-
-    def _build_viewer_manifest(
-        self,
-        scene_plan,
-        completed_frames: list[FrameStatus],
-        project_id: str,
-        room_id: str,
-        video_url: str,
-    ) -> dict:
-        """Build the viewer_manifest.json structure.
-
-        Contains all frame URLs, camera positions, frame types, and video URL
-        for the interactive 3D viewer.
-        """
-        frames_data: list[dict] = []
-        num_cameras = len(scene_plan.camera_positions)
-
-        for fs in completed_frames:
-            frame_idx = fs.frame_idx
-            camera_idx = frame_idx // 4 if num_cameras > 0 else 0
-
-            # Build GCS path for graded frame
-            graded_gcs_path = GCS_PATH_FRAMES_GRADED.format(
-                project_id=project_id, room_id=room_id, n=frame_idx
-            )
-
-            # Get camera position data
-            camera_data = {}
-            if camera_idx < num_cameras:
-                cam = scene_plan.camera_positions[camera_idx]
-                camera_data = {
-                    "pos_x": cam.pos_x,
-                    "pos_y": cam.pos_y,
-                    "height_m": cam.height_m,
-                    "look_at_x": cam.look_at_x,
-                    "look_at_y": cam.look_at_y,
-                    "fov_deg": cam.fov_deg,
-                    "look_at_description": cam.look_at_description,
-                }
-
-            frame_entry = {
-                "frame_idx": frame_idx,
-                "frame_type": fs.frame_type,
-                "gcs_path": graded_gcs_path,
-                "frame_url": self.storage.get_signed_url(graded_gcs_path),
-                "camera": camera_data,
-            }
-            frames_data.append(frame_entry)
-
-        manifest = {
-            "project_id": project_id,
-            "room_id": room_id,
-            "room_label": scene_plan.room.label,
-            "style_anchor": scene_plan.style_anchor,
-            "total_frames": len(frames_data),
-            "total_cameras": num_cameras,
-            "video_url": video_url,
-            "frames": frames_data,
-            "furniture_layout": scene_plan.furniture_layout,
-            "camera_positions": [
-                {
-                    "index": i,
-                    "pos_x": cam.pos_x,
-                    "pos_y": cam.pos_y,
-                    "height_m": cam.height_m,
-                    "look_at_x": cam.look_at_x,
-                    "look_at_y": cam.look_at_y,
-                    "fov_deg": cam.fov_deg,
-                    "look_at_description": cam.look_at_description,
-                }
-                for i, cam in enumerate(scene_plan.camera_positions)
-            ],
-        }
-
-        return manifest
-
-    async def _build_master_video(
-        self,
-        project_id: str,
-        current_room_video_path: str,
-    ) -> str | None:
-        """Build a master multi-room video by concatenating all room videos.
-
-        Discovers all room videos under the project in GCS, downloads them,
-        and concatenates with ffmpeg.
-        """
-        import subprocess
-
-        logger.info("Building master multi-room video for project %s", project_id)
-
-        # List all room video files in the project
-        video_prefix = f"projects/{project_id}/rooms/"
-        all_files = await self.storage.list_files(video_prefix)
-        video_files = [f for f in all_files if f.endswith("/video/room.mp4")]
-        video_files.sort()
-
-        if len(video_files) < 2:
-            logger.info(
-                "Only %d room video(s) found — skipping master video",
-                len(video_files),
-            )
-            return None
-
-        # Download all room videos to temp dir
-        master_dir = os.path.join(str(TEMP_DIR), project_id, "master")
-        os.makedirs(master_dir, exist_ok=True)
-
-        local_videos: list[str] = []
-        for i, gcs_path in enumerate(video_files):
-            local_path = os.path.join(master_dir, f"room_{i:02d}.mp4")
-            try:
-                await self.storage.download_file(gcs_path, local_path)
-                local_videos.append(local_path)
-            except Exception as exc:
-                logger.warning("Failed to download room video %s: %s", gcs_path, exc)
-
-        if len(local_videos) < 2:
-            logger.info("Not enough room videos downloaded for master assembly")
-            return None
-
-        # Build ffmpeg concat file
-        concat_file = os.path.join(master_dir, "concat.txt")
-        with open(concat_file, "w") as f:
-            for vp in local_videos:
-                f.write(f"file '{vp}'\n")
-
-        master_output = os.path.join(master_dir, "walkthrough.mp4")
-
-        cmd = [
-            "ffmpeg", "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", concat_file,
-            "-c:v", "libx264",
-            "-crf", "18",
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-            master_output,
-        ]
-
-        logger.info("Running ffmpeg concat: %s", " ".join(cmd))
-
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: subprocess.run(cmd, capture_output=True, text=True, timeout=600),
-        )
-
-        if result.returncode != 0:
-            logger.error("Master video ffmpeg failed: %s", result.stderr[:500])
-            raise VeoError(f"Master video concat failed: {result.stderr[:300]}")
-
-        # Upload master video to GCS
-        master_gcs_path = GCS_PATH_MASTER_VIDEO.format(project_id=project_id)
-        await self.storage.upload_file(master_output, master_gcs_path)
-        master_url = self.storage.get_signed_url(master_gcs_path)
-
-        logger.info("Master video uploaded -> %s", master_gcs_path)
-        return master_url

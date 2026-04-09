@@ -47,7 +47,7 @@ class MissingField(BaseModel):
     field: str
     question: str
     default_guess: str | float | None = None
-    importance: Literal["critical", "high", "medium", "low"] = "medium"
+    importance: str = "medium"  # critical, high, medium, low
 
 
 class ExtractionResult(BaseModel):
@@ -86,5 +86,5 @@ class FurnitureItemExtracted(BaseModel):
     material: str | None = None
     style_tags: list[str] = []
     dims_estimated: dict | None = None
-    image_quality: Literal["product_render", "product_photo", "scene_photo", "unclear"] = "unclear"
+    image_quality: str = "unclear"  # e.g. product_render, product_photo, scene_photo, context_render
     notes: str = ""

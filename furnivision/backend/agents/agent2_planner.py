@@ -69,6 +69,7 @@ class PlannerAgent:
         furniture_items: list[FurnitureItem],
         brief: ProjectBrief,
         project_style: str,
+        project_id: str | None = None,
     ) -> ScenePlan:
         """Build a complete scene plan for one room.
 
@@ -87,7 +88,7 @@ class PlannerAgent:
         -------
         ScenePlan
         """
-        project_id = str(uuid.uuid4())
+        project_id = project_id or str(uuid.uuid4())
         room_id = room.id
 
         logger.info(

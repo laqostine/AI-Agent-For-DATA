@@ -4,6 +4,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from models.project import Project, ProjectBrief, RoomGeometry, FurnitureItem
 from models.pipeline import PipelineState, RoomPipelineState, FrameStatus
@@ -41,6 +42,11 @@ class PipelineOrchestrator:
     def _get_planner_agent():
         from agents.agent2_planner import PlannerAgent
         return PlannerAgent()
+
+    @staticmethod
+    def _get_composer_agent():
+        from agents.agent2_5_composer import SceneComposerAgent
+        return SceneComposerAgent()
 
     @staticmethod
     def _get_generator_agent():
@@ -83,10 +89,32 @@ class PipelineOrchestrator:
             # --- STAGE 1: Agent 1 — Parse PDF + Furniture ---
             await self._update_state(project_id, 1, "parsing")
             parser = self._get_parser_agent()
-            extraction = await parser.extract(
-                floorplan_gcs_path=project.floorplan_gcs_path,
-                furniture_gcs_paths=[f["gcs_path"] for f in project.furniture_gcs_paths],
-                project_id=project_id,
+
+            # Download files from storage to local temp dir for Agent 1
+            from services.storage import StorageService
+            from config import TEMP_DIR
+            storage = StorageService()
+            proj_tmp = TEMP_DIR / f"parse_{project_id}"
+            proj_tmp.mkdir(parents=True, exist_ok=True)
+
+            floorplan_local = str(proj_tmp / Path(project.floorplan_gcs_path).name)
+            await storage.download_file(project.floorplan_gcs_path, floorplan_local)
+
+            furniture_images = []
+            for fi in project.furniture_gcs_paths:
+                ext = Path(fi["gcs_path"]).suffix or ".png"
+                local_path = str(proj_tmp / f"furniture_{fi['id']}{ext}")
+                await storage.download_file(fi["gcs_path"], local_path)
+                furniture_images.append({
+                    "id": fi.get("id", ""),
+                    "path": local_path,
+                    "filename": fi.get("filename", ""),
+                })
+
+            extraction = await parser.parse(
+                pdf_path=floorplan_local,
+                furniture_images=furniture_images,
+                brief_data={"project_id": project_id},
             )
             await self.state.save_extraction(project_id, extraction)
             await self.state.update_project(project_id, {"status": "awaiting_gate1"})
@@ -105,7 +133,13 @@ class PipelineOrchestrator:
             project = await self.state.get_project(project_id)
             extraction = await self.state.get_extraction(project_id)
 
-            # --- STAGE 2: For each room — Agents 2→3→4→5 ---
+            # Download reference renders for visual anchoring (if any)
+            reference_images = await self._download_reference_images(project)
+
+            # Convert floor plan PDF → PNG bytes for SceneComposer
+            floor_plan_image_bytes = await self._load_floor_plan_image(project)
+
+            # --- STAGE 2: For each room — Agents 2→2.5→3→4→5 ---
             await self.state.update_project(project_id, {"status": "generating"})
             await self._update_state(project_id, 2, "generating_rooms")
 
@@ -130,13 +164,11 @@ class PipelineOrchestrator:
 
             # Run all rooms
             for room in rooms_to_process:
-                furniture_items = [
-                    fi for fi in project.rooms
-                    if fi.id == room.id
-                ]
                 room_furniture = room.furniture_items
                 await self._run_room_pipeline(
-                    project_id, room.id, room, room_furniture, project.brief
+                    project_id, room.id, room, room_furniture, project.brief,
+                    reference_images=reference_images,
+                    floor_plan_image_bytes=floor_plan_image_bytes,
                 )
 
             # --- Update state to awaiting_gate2 ---
@@ -221,9 +253,13 @@ class PipelineOrchestrator:
             )
             await self.state.create_pipeline_state(ps)
 
+        reference_images = await self._download_reference_images(project)
+        floor_plan_image_bytes = await self._load_floor_plan_image(project)
         await self.state.update_project(project_id, {"status": "generating"})
         await self._run_room_pipeline(
-            project_id, room_id, room, room.furniture_items, project.brief
+            project_id, room_id, room, room.furniture_items, project.brief,
+            reference_images=reference_images,
+            floor_plan_image_bytes=floor_plan_image_bytes,
         )
         await self.state.update_project(project_id, {"status": "awaiting_gate2"})
 
@@ -238,8 +274,14 @@ class PipelineOrchestrator:
         room: RoomGeometry,
         furniture_items: list[FurnitureItem],
         brief: ProjectBrief,
+        reference_images: list[bytes] | None = None,
+        floor_plan_image_bytes: bytes | None = None,
     ) -> None:
-        """Execute the Agent 2→3→4→5 chain for a single room."""
+        """Execute the Agent 2→2.5→3→4→5 chain for a single room.
+
+        reference_images: uploaded reference renders (highest priority)
+        floor_plan_image_bytes: PNG of the floor plan for SceneComposer
+        """
         logger.info("Room pipeline starting: project=%s room=%s (%s)", project_id, room_id, room.label)
 
         try:
@@ -250,21 +292,59 @@ class PipelineOrchestrator:
                 room=room,
                 furniture_items=furniture_items,
                 brief=brief,
+                project_style=getattr(brief, "overall_style", "modern"),
                 project_id=project_id,
             )
             logger.info("Agent 2 complete for room %s: %d camera positions", room_id, len(scene_plan.camera_positions))
 
+            # --- Agent 2.5: Scene Composer (floor plan + furniture → synthetic render) ---
+            composed_reference: bytes | None = None
+            if floor_plan_image_bytes:
+                composer = self._get_composer_agent()
+                # Collect furniture images for this room
+                room_furniture_images = await self._download_room_furniture_images(
+                    furniture_items=furniture_items,
+                )
+                if room_furniture_images:
+                    try:
+                        composed = await composer.compose(
+                            room_id=room_id,
+                            room_label=room.label,
+                            floor_plan_bytes=floor_plan_image_bytes,
+                            furniture_images=room_furniture_images,
+                            scene_plan=scene_plan,
+                        )
+                        composed_reference = composed.reference_render
+                        logger.info(
+                            "Agent 2.5 composed render for room %s: %d bytes",
+                            room_id, len(composed_reference),
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Agent 2.5 SceneComposer failed for room %s: %s — using uploaded reference",
+                            room_id, exc,
+                        )
+
+            # Priority: uploaded reference render > composed render
+            effective_references = reference_images or (
+                [composed_reference] if composed_reference else None
+            )
+
             # --- Agent 3: Image Generator ---
             await self.state.update_room_state(project_id, room_id, {"status": "generating"})
             generator = self._get_generator_agent()
-            generation_result = await generator.generate(
+            # Retrieve job_id from pipeline state for frame tracking
+            try:
+                ps = await self.state.get_pipeline_state(project_id)
+                job_id = ps.job_id
+            except Exception:
+                job_id = str(uuid.uuid4())
+            generation_result = await generator.generate_all_frames(
                 scene_plan=scene_plan,
-                room=room,
-                furniture_items=furniture_items,
-                brief=brief,
                 project_id=project_id,
                 room_id=room_id,
-                state_manager=self.state,
+                job_id=job_id,
+                reference_images=effective_references,
             )
             logger.info("Agent 3 complete for room %s: %d frames generated", room_id, len(generation_result))
 
@@ -274,34 +354,32 @@ class PipelineOrchestrator:
             validation = await validator.validate(
                 frames=generation_result,
                 scene_plan=scene_plan,
-                room=room,
-                furniture_items=furniture_items,
-                project_id=project_id,
                 room_id=room_id,
             )
+            qc_score = getattr(validation, "overall_score", getattr(validation, "consistency_score", 1.0))
             logger.info(
-                "Agent 4 complete for room %s: score=%.2f, pass=%s",
-                room_id, validation.consistency_score, validation.passed,
+                "Agent 4 complete for room %s: score=%.2f",
+                room_id, qc_score,
             )
 
             # Store QC score and hero frame URLs
             await self.state.update_room_state(project_id, room_id, {
-                "qc_score": validation.consistency_score,
-                "hero_frame_urls": validation.hero_frame_urls if hasattr(validation, "hero_frame_urls") else [],
+                "qc_score": qc_score,
+                "hero_frame_urls": getattr(validation, "graded_frame_urls", []),
             })
 
-            if not validation.passed:
-                logger.warning("Room %s failed QC (score=%.2f)", room_id, validation.consistency_score)
-                # Could trigger re-generation here, but we let human gate decide
+            if qc_score < QC_CONSISTENCY_THRESHOLD:
+                logger.warning("Room %s low QC score (%.2f)", room_id, qc_score)
 
             # --- Agent 5: Animator ---
             await self.state.update_room_state(project_id, room_id, {"status": "animating"})
             animator = self._get_animator_agent()
             animation = await animator.animate(
-                frames=generation_result,
+                validated_frames=generation_result,
                 scene_plan=scene_plan,
                 project_id=project_id,
                 room_id=room_id,
+                reference_images=reference_images,
             )
             logger.info("Agent 5 complete for room %s: video=%s", room_id, animation.video_url)
 
@@ -343,6 +421,92 @@ class PipelineOrchestrator:
 
         logger.warning("Gate %d timed out for project %s after %d hours", gate, project_id, timeout_hours)
         return False
+
+    # ------------------------------------------------------------------
+    # Reference image helpers
+    # ------------------------------------------------------------------
+
+    async def _load_floor_plan_image(self, project) -> bytes | None:
+        """Convert the project's floor plan PDF to PNG bytes for SceneComposer.
+
+        Returns the first page as PNG bytes, or None if unavailable.
+        """
+        gcs_path = getattr(project, "floorplan_gcs_path", "")
+        if not gcs_path:
+            return None
+        try:
+            from services.storage import StorageService
+            from services.pdf_processor import PDFProcessor
+            import tempfile, os
+            storage = StorageService()
+            # Download PDF to a temp file
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp_path = tmp.name
+            await storage.download_file(gcs_path, tmp_path)
+            processor = PDFProcessor()
+            pages = processor.convert_to_images(tmp_path, dpi=150)
+            os.unlink(tmp_path)
+            if pages:
+                logger.info(
+                    "Floor plan converted to PNG: %d bytes (page 1 of %d)",
+                    len(pages[0]), len(pages),
+                )
+                return pages[0]
+        except Exception as exc:
+            logger.warning("Could not load floor plan image: %s", exc)
+        return None
+
+    async def _download_room_furniture_images(
+        self,
+        furniture_items,
+    ) -> list[bytes]:
+        """Download furniture catalogue images for a room from storage.
+
+        Returns a list of raw image bytes (may be empty).
+        """
+        from services.storage import StorageService
+        storage = StorageService()
+        images: list[bytes] = []
+        for item in furniture_items:
+            gcs_url = getattr(item, "gcs_image_url", "")
+            if not gcs_url:
+                continue
+            try:
+                data = await storage.download_bytes(gcs_url)
+                images.append(data)
+            except Exception as exc:
+                logger.warning(
+                    "Could not download furniture image for %s: %s",
+                    getattr(item, "item_name", item.id), exc,
+                )
+        return images
+
+    async def _download_reference_images(self, project) -> list[bytes]:
+        """Download all reference render images for this project.
+
+        Returns a list of raw image bytes (may be empty if none uploaded).
+        """
+        refs = getattr(project, "reference_render_gcs_paths", []) or []
+        if not refs:
+            return []
+
+        from services.storage import StorageService
+        storage = StorageService()
+        images: list[bytes] = []
+        for ref in refs:
+            gcs_path = ref.get("gcs_path", "")
+            if not gcs_path:
+                continue
+            try:
+                data = await storage.download_bytes(gcs_path)
+                images.append(data)
+                logger.info(
+                    "Loaded reference render: %s (%d bytes)",
+                    ref.get("filename", gcs_path), len(data),
+                )
+            except Exception as exc:
+                logger.warning("Could not load reference render %s: %s", gcs_path, exc)
+        return images
 
     # ------------------------------------------------------------------
     # State helpers

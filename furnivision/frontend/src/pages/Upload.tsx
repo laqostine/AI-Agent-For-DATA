@@ -2,386 +2,280 @@ import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import FileDropzone from '@/components/upload/FileDropzone';
 import UploadProgress from '@/components/upload/UploadProgress';
-import { createProject, uploadFloorplan, uploadFurniture, startPipeline } from '@/lib/api';
-import { useProjectStore } from '@/stores/projectStore';
-import { usePipelineStore } from '@/stores/pipelineStore';
+import { createV5Project, uploadSpec, uploadLogo, uploadMusic } from '@/lib/api';
 import { formatFileSize, cn } from '@/lib/utils';
-import type { ProjectBrief } from '@/lib/types';
+
+const STEPS = [
+  { num: 1, label: 'Upload', icon: '📄' },
+  { num: 2, label: 'Review', icon: '🔍' },
+  { num: 3, label: 'Render', icon: '🎨' },
+  { num: 4, label: 'Video', icon: '🎬' },
+];
 
 export default function Upload() {
   const navigate = useNavigate();
-  const { brief, updateBrief } = useProjectStore();
-  const setJobId = usePipelineStore((s) => s.setJobId);
-
-  const [floorplanFile, setFloorplanFile] = useState<File | null>(null);
-  const [furnitureFiles, setFurnitureFiles] = useState<File[]>([]);
-  const [floorplanPreview, setFloorplanPreview] = useState<string | null>(null);
-  const [furniturePreviews, setFurniturePreviews] = useState<string[]>([]);
-
-  const [floorplanProgress, setFloorplanProgress] = useState(0);
-  const [furnitureProgress, setFurnitureProgress] = useState(0);
+  const [specFile, setSpecFile] = useState<File | null>(null);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [musicFile, setMusicFile] = useState<File | null>(null);
+  const [specProgress, setSpecProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStep, setUploadStep] = useState<string | null>(null);
-  const [showBrief, setShowBrief] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showOptional, setShowOptional] = useState(false);
 
-  const handleFloorplanDrop = useCallback((files: File[]) => {
+  const handleSpecDrop = useCallback((files: File[]) => {
     const file = files[0];
     if (!file) return;
-    setFloorplanFile(file);
-    // Generate preview for PDFs or images
-    if (file.type.startsWith('image/')) {
-      setFloorplanPreview(URL.createObjectURL(file));
-    } else {
-      setFloorplanPreview(null);
-    }
+    setSpecFile(file);
+    setError(null);
   }, []);
-
-  const handleFurnitureDrop = useCallback((files: File[]) => {
-    setFurnitureFiles((prev) => [...prev, ...files]);
-    const newPreviews = files.map((f) => URL.createObjectURL(f));
-    setFurniturePreviews((prev) => [...prev, ...newPreviews]);
-  }, []);
-
-  const removeFurnitureFile = (index: number) => {
-    setFurnitureFiles((prev) => prev.filter((_, i) => i !== index));
-    setFurniturePreviews((prev) => prev.filter((_, i) => i !== index));
-  };
 
   const handleSubmit = async () => {
-    if (!floorplanFile) {
-      setError('Please upload a floor plan');
-      return;
-    }
-
+    if (!specFile) { setError('Please upload a PPTX specification file'); return; }
     setIsUploading(true);
     setError(null);
-
     try {
-      // Step 1: Create project
       setUploadStep('Creating project...');
-      const { project_id } = await createProject({
-        name: `Project ${new Date().toLocaleDateString()}`,
-        brief,
-      });
-
-      // Step 2: Upload floorplan
-      setUploadStep('Uploading floor plan...');
-      await uploadFloorplan(project_id, floorplanFile, setFloorplanProgress);
-
-      // Step 3: Upload furniture
-      if (furnitureFiles.length > 0) {
-        setUploadStep('Uploading furniture images...');
-        await uploadFurniture(project_id, furnitureFiles, setFurnitureProgress);
-      }
-
-      // Step 4: Start extraction pipeline
-      setUploadStep('Starting analysis...');
-      const { job_id } = await startPipeline({
-        project_id,
-        mode: 'all',
-      });
-      setJobId(job_id, project_id);
-
-      navigate(`/confirm/${project_id}`);
+      const { project_id } = await createV5Project(`Project ${new Date().toLocaleDateString('en-GB')}`);
+      setUploadStep('Uploading specification...');
+      await uploadSpec(project_id, specFile, setSpecProgress);
+      if (logoFile) { setUploadStep('Uploading logo...'); await uploadLogo(project_id, logoFile); }
+      if (musicFile) { setUploadStep('Uploading music...'); await uploadMusic(project_id, musicFile); }
+      navigate(`/extraction-review/${project_id}`);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Upload failed';
-      setError(message);
+      setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setIsUploading(false);
       setUploadStep(null);
     }
   };
 
-  const handleBriefChange = (field: keyof ProjectBrief, value: string | number) => {
-    updateBrief({ [field]: value });
-  };
-
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
-      <header className="border-b border-gray-800 bg-surface-800/50 backdrop-blur-sm">
-        <div className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-100 tracking-tight">FurniVision AI</h1>
-            <p className="text-sm text-gray-500 mt-0.5">Interior visualisation powered by AI</p>
+      <header className="border-b border-gray-800/50 bg-surface-800/80 backdrop-blur-md sticky top-0 z-50">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-accent to-purple-600 flex items-center justify-center">
+              <span className="text-white font-bold text-sm">FV</span>
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-gray-100 tracking-tight leading-tight">FurniVision AI</h1>
+              <p className="text-[11px] text-gray-500 -mt-0.5">Showroom Visualisation</p>
+            </div>
+          </div>
+          {/* Step indicator */}
+          <div className="hidden md:flex items-center gap-1">
+            {STEPS.map((s, i) => (
+              <div key={s.num} className="flex items-center">
+                <div className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+                  s.num === 1 ? 'bg-accent/20 text-accent border border-accent/30' : 'text-gray-500',
+                )}>
+                  <span>{s.icon}</span>
+                  <span>{s.label}</span>
+                </div>
+                {i < STEPS.length - 1 && <div className="w-6 h-px bg-gray-700 mx-1" />}
+              </div>
+            ))}
           </div>
         </div>
       </header>
 
       {/* Main */}
-      <main className="flex-1 max-w-6xl mx-auto px-6 py-10 w-full">
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold text-gray-100 mb-2">Upload Your Files</h2>
-          <p className="text-gray-400">
-            Start by uploading your floor plan and furniture images. We will analyse them and create stunning visualisations.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          {/* Floor Plan Dropzone */}
-          <div>
-            <FileDropzone
-              accept={{ 'application/pdf': ['.pdf'], 'image/*': ['.png', '.jpg', '.jpeg'] }}
-              label="Floor Plan PDF or Image"
-              sublabel="Drop your floor plan here, or click to browse"
-              icon={
-                <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                </svg>
-              }
-              onDrop={handleFloorplanDrop}
-              disabled={isUploading}
-              className="h-64"
-            />
-            {floorplanFile && (
-              <div className="mt-3 card p-3 flex items-center gap-3">
-                {floorplanPreview && (
-                  <img src={floorplanPreview} alt="Preview" className="w-16 h-16 rounded-lg object-cover" />
-                )}
-                {!floorplanPreview && (
-                  <div className="w-16 h-16 rounded-lg bg-surface-900 flex items-center justify-center">
-                    <svg className="w-8 h-8 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                    </svg>
-                  </div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-200 truncate">{floorplanFile.name}</p>
-                  <p className="text-xs text-gray-500">{formatFileSize(floorplanFile.size)}</p>
-                </div>
-                <button
-                  className="text-gray-500 hover:text-danger transition-colors p-1"
-                  onClick={() => {
-                    setFloorplanFile(null);
-                    setFloorplanPreview(null);
-                  }}
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Furniture Dropzone */}
-          <div>
-            <FileDropzone
-              accept={{ 'image/*': ['.png', '.jpg', '.jpeg', '.webp'] }}
-              multiple
-              label="Furniture Images"
-              sublabel="Drop furniture photos here, or click to browse"
-              icon={
-                <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
-                </svg>
-              }
-              onDrop={handleFurnitureDrop}
-              disabled={isUploading}
-              className="h-64"
-            />
-            {furniturePreviews.length > 0 && (
-              <div className="mt-3 grid grid-cols-4 gap-2">
-                {furniturePreviews.map((preview, idx) => (
-                  <div key={idx} className="relative group">
-                    <img
-                      src={preview}
-                      alt={furnitureFiles[idx]?.name}
-                      className="w-full aspect-square rounded-lg object-cover border border-gray-700/50"
-                    />
-                    <button
-                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 text-gray-300 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-xs"
-                      onClick={() => removeFurnitureFile(idx)}
-                    >
-                      x
-                    </button>
-                    <p className="text-[10px] text-gray-500 truncate mt-1">
-                      {furnitureFiles[idx]?.name}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Upload progress */}
-        {isUploading && (
-          <div className="space-y-3 mb-8 animate-fade-in">
-            <p className="text-sm text-accent-light font-medium">{uploadStep}</p>
-            {floorplanProgress > 0 && (
-              <UploadProgress
-                filename={floorplanFile?.name ?? 'Floor plan'}
-                progress={floorplanProgress}
-                status={floorplanProgress >= 100 ? 'complete' : 'uploading'}
-              />
-            )}
-            {furnitureProgress > 0 && (
-              <UploadProgress
-                filename={`${furnitureFiles.length} furniture images`}
-                progress={furnitureProgress}
-                status={furnitureProgress >= 100 ? 'complete' : 'uploading'}
-              />
-            )}
+      <main className="flex-1 max-w-3xl mx-auto px-6 py-12 w-full">
+        {/* Demo banner in production (no backend) */}
+        {!(import.meta as any).env?.DEV && (
+          <div className="mb-8 card p-5 flex items-center justify-between bg-accent/5 border-accent/20">
+            <div>
+              <p className="text-sm font-medium text-white">See FurniVision in action</p>
+              <p className="text-xs text-gray-400 mt-0.5">Interactive demo with real AI-generated renders from a Forthing dealership spec</p>
+            </div>
+            <a href="/demo" className="btn-primary px-5 py-2.5 text-sm flex-shrink-0">
+              Open Demo
+            </a>
           </div>
         )}
 
-        {/* Design Brief (expandable) */}
+        {/* Hero */}
+        <div className="text-center mb-10">
+          <h2 className="text-4xl font-extrabold text-gray-100 tracking-tight">
+            Upload Your Spec
+          </h2>
+          <p className="text-gray-400 mt-3 text-lg max-w-xl mx-auto">
+            Drop your PPTX furniture specification and let AI extract every room, product, and layout automatically.
+          </p>
+        </div>
+
+        {/* Main dropzone card */}
+        <div className="card p-8 mb-6">
+          <FileDropzone
+            accept={{
+              'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
+              'application/vnd.ms-powerpoint': ['.ppt'],
+            }}
+            label="PPTX Specification File"
+            sublabel="Drag & drop or click to browse"
+            icon={
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-orange-500/20 to-red-500/20 border border-orange-500/20 flex items-center justify-center mb-1">
+                <svg className="w-8 h-8 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5M9 11.25v1.5M12 9v3.75m3-6v6" />
+                </svg>
+              </div>
+            }
+            onDrop={handleSpecDrop}
+            disabled={isUploading}
+            className="h-48"
+          />
+
+          {/* File preview */}
+          {specFile && (
+            <div className="mt-4 flex items-center gap-3 p-3 rounded-lg bg-surface-900/50 border border-gray-700/30">
+              <div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center flex-shrink-0">
+                <span className="text-orange-400 text-[10px] font-bold">PPTX</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-gray-200 truncate font-medium">{specFile.name}</p>
+                <p className="text-xs text-gray-500">{formatFileSize(specFile.size)}</p>
+              </div>
+              <button
+                className="text-gray-500 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-red-500/10"
+                onClick={() => setSpecFile(null)}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Optional section */}
         <div className="mb-8">
           <button
-            className="flex items-center gap-2 text-gray-300 hover:text-gray-100 transition-colors mb-4"
-            onClick={() => setShowBrief(!showBrief)}
+            className="flex items-center gap-2 text-gray-400 hover:text-gray-200 transition-colors group"
+            onClick={() => setShowOptional(!showOptional)}
           >
-            <svg
-              className={cn('w-4 h-4 transition-transform', showBrief && 'rotate-90')}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
+            <svg className={cn('w-3.5 h-3.5 transition-transform', showOptional && 'rotate-90')}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
             </svg>
-            <span className="text-lg font-semibold">Design Brief</span>
-            <span className="text-sm text-gray-500 font-normal">(optional -- defaults provided)</span>
+            <span className="text-sm">Optional: Logo & Music for final video</span>
           </button>
-
-          {showBrief && (
-            <div className="card p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-slide-up">
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1.5">Ceiling Height (m)</label>
-                <input
-                  type="number"
-                  className="input-field"
-                  value={brief.ceiling_height}
-                  onChange={(e) => handleBriefChange('ceiling_height', parseFloat(e.target.value) || 2.7)}
-                  step="0.1"
+          {showOptional && (
+            <div className="mt-3 grid grid-cols-2 gap-3 animate-slide-up">
+              <div className="card p-4">
+                <FileDropzone
+                  accept={{ 'image/*': ['.png', '.jpg', '.jpeg', '.svg'] }}
+                  label="Logo"
+                  sublabel="Video end card"
+                  icon={<span className="text-2xl">🏢</span>}
+                  onDrop={(f) => setLogoFile(f[0] ?? null)}
+                  disabled={isUploading}
+                  className="h-24"
                 />
+                {logoFile && <p className="text-[11px] text-gray-500 mt-2 truncate">{logoFile.name}</p>}
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1.5">Floor Material</label>
-                <select
-                  className="input-field"
-                  value={brief.floor_material}
-                  onChange={(e) => handleBriefChange('floor_material', e.target.value)}
-                >
-                  <option value="hardwood">Hardwood</option>
-                  <option value="tile">Tile</option>
-                  <option value="carpet">Carpet</option>
-                  <option value="marble">Marble</option>
-                  <option value="concrete">Concrete</option>
-                  <option value="laminate">Laminate</option>
-                  <option value="vinyl">Vinyl</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1.5">Wall Color</label>
-                <input
-                  type="text"
-                  className="input-field"
-                  value={brief.wall_color}
-                  onChange={(e) => handleBriefChange('wall_color', e.target.value)}
-                  placeholder="e.g. white, cream, light grey"
+              <div className="card p-4">
+                <FileDropzone
+                  accept={{ 'audio/*': ['.mp3', '.wav', '.m4a'] }}
+                  label="Music"
+                  sublabel="Background audio"
+                  icon={<span className="text-2xl">🎵</span>}
+                  onDrop={(f) => setMusicFile(f[0] ?? null)}
+                  disabled={isUploading}
+                  className="h-24"
                 />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1.5">Style</label>
-                <select
-                  className="input-field"
-                  value={brief.style}
-                  onChange={(e) => handleBriefChange('style', e.target.value)}
-                >
-                  <option value="modern">Modern</option>
-                  <option value="contemporary">Contemporary</option>
-                  <option value="minimalist">Minimalist</option>
-                  <option value="scandinavian">Scandinavian</option>
-                  <option value="industrial">Industrial</option>
-                  <option value="traditional">Traditional</option>
-                  <option value="mid-century">Mid-Century Modern</option>
-                  <option value="bohemian">Bohemian</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1.5">Lighting</label>
-                <select
-                  className="input-field"
-                  value={brief.lighting}
-                  onChange={(e) => handleBriefChange('lighting', e.target.value)}
-                >
-                  <option value="natural">Natural</option>
-                  <option value="warm">Warm</option>
-                  <option value="cool">Cool</option>
-                  <option value="ambient">Ambient</option>
-                  <option value="dramatic">Dramatic</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1.5">Room Dimensions (W x L m)</label>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    className="input-field"
-                    placeholder="Width"
-                    value={brief.dimensions?.width ?? ''}
-                    onChange={(e) =>
-                      updateBrief({
-                        dimensions: {
-                          width: parseFloat(e.target.value) || 0,
-                          length: brief.dimensions?.length ?? 0,
-                        },
-                      })
-                    }
-                    step="0.1"
-                  />
-                  <input
-                    type="number"
-                    className="input-field"
-                    placeholder="Length"
-                    value={brief.dimensions?.length ?? ''}
-                    onChange={(e) =>
-                      updateBrief({
-                        dimensions: {
-                          width: brief.dimensions?.width ?? 0,
-                          length: parseFloat(e.target.value) || 0,
-                        },
-                      })
-                    }
-                    step="0.1"
-                  />
-                </div>
+                {musicFile && <p className="text-[11px] text-gray-500 mt-2 truncate">{musicFile.name}</p>}
               </div>
             </div>
           )}
         </div>
 
+        {/* Progress */}
+        {isUploading && (
+          <div className="card p-5 mb-6 animate-fade-in">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+              <span className="text-sm font-medium text-accent-light">{uploadStep}</span>
+            </div>
+            {specProgress > 0 && (
+              <UploadProgress
+                filename={specFile?.name ?? 'Specification'}
+                progress={specProgress}
+                status={specProgress >= 100 ? 'complete' : 'uploading'}
+              />
+            )}
+          </div>
+        )}
+
         {/* Error */}
         {error && (
-          <div className="mb-6 p-4 rounded-lg bg-danger/10 border border-danger/30 text-danger text-sm animate-fade-in">
+          <div className="mb-6 p-4 rounded-xl bg-red-500/5 border border-red-500/20 text-red-400 text-sm flex items-center gap-3 animate-fade-in">
+            <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+            </svg>
             {error}
           </div>
         )}
 
         {/* Submit */}
-        <div className="flex justify-end">
-          <button
-            className="btn-primary text-lg px-8 py-4"
-            onClick={handleSubmit}
-            disabled={isUploading || !floorplanFile}
-          >
-            {isUploading ? (
-              <span className="flex items-center gap-2">
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Processing...
-              </span>
-            ) : (
-              <span className="flex items-center gap-2">
-                Analyse Floor Plan
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                </svg>
-              </span>
-            )}
-          </button>
+        <button
+          className="w-full btn-primary text-lg py-4 flex items-center justify-center gap-2"
+          onClick={handleSubmit}
+          disabled={isUploading || !specFile}
+        >
+          {isUploading ? (
+            <>
+              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              Processing...
+            </>
+          ) : (
+            <>
+              Extract & Review
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+            </>
+          )}
+        </button>
+
+        {/* Forthing walkthrough video */}
+        <div className="mt-12 card overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-800/30 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-gray-500">AI-Generated Output</p>
+              <p className="text-[11px] text-gray-600 mt-0.5">Forthing dealership showroom — 13 rooms rendered from a single PPTX spec</p>
+            </div>
+            <a href="/demo" className="text-xs text-accent hover:text-accent-light transition-colors font-medium">
+              Try live demo →
+            </a>
+          </div>
+          <div className="bg-black">
+            <video
+              src="/demo/forthing_walkthrough.mp4"
+              controls
+              muted
+              autoPlay
+              loop
+              playsInline
+              className="w-full"
+              style={{ maxHeight: '450px' }}
+            />
+          </div>
+        </div>
+
+        {/* How it works */}
+        <div className="mt-10 pt-8 border-t border-gray-800/50">
+          <p className="text-center text-xs text-gray-600 uppercase tracking-widest mb-6">How it works</p>
+          <div className="grid grid-cols-4 gap-4">
+            {STEPS.map((s) => (
+              <div key={s.num} className="text-center group">
+                <div className="text-2xl mb-2">{s.icon}</div>
+                <p className="text-xs font-medium text-gray-300">{s.label}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </main>
     </div>

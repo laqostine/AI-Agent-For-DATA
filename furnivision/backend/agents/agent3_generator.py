@@ -1,4 +1,10 @@
-"""FurniVision AI — Agent 3: Generator — Imagen 3 frame generation."""
+"""FurniVision AI — Agent 3: Generator — 2 Imagen keyframes per room.
+
+If reference renders are supplied, Gemini analyses them first to create
+a visually-grounded prompt that matches the actual room design (dimensions,
+furniture, materials, lighting). Without references, falls back to the
+scene plan prompts from Agent 2.
+"""
 
 import asyncio
 import logging
@@ -7,63 +13,19 @@ from datetime import datetime
 from models.pipeline import FrameStatus
 from services.imagen import ImagenService, ImagenError
 from services.storage import StorageService
-from config import (
-    GCS_PATH_FRAMES_RAW,
-    MAX_CONCURRENT_IMAGEN_CALLS,
-    MAX_REGENERATION_ATTEMPTS,
-)
+from config import GCS_PATH_FRAMES_RAW, MAX_REGENERATION_ATTEMPTS
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Prompt softening helper
-# ---------------------------------------------------------------------------
-
-_SOFTEN_REMOVALS = [
-    "8K ultra detailed",
-    "shot on Canon EOS R5, 35mm lens, f/4.0, ISO 200",
-    "CRITICAL: ",
-]
-
-_SOFTEN_REPLACEMENTS = {
-    "photorealistic architectural interior render": "high quality interior render",
-    "warm neutral colour grade": "neutral colour grade",
-}
-
-
-def _soften_prompt(prompt: str) -> str:
-    """Produce a less aggressive prompt for retry after repeated failures.
-
-    Removes overly specific technical terms that some models may reject and
-    simplifies stylistic directives.
-    """
-    softened = prompt
-    for removal in _SOFTEN_REMOVALS:
-        softened = softened.replace(removal, "")
-    for old, new in _SOFTEN_REPLACEMENTS.items():
-        softened = softened.replace(old, new)
-    # Clean up double spaces and trailing commas
-    while "  " in softened:
-        softened = softened.replace("  ", " ")
-    softened = softened.replace(", ,", ",").replace(",,", ",").strip()
-    return softened
-
-
-# ---------------------------------------------------------------------------
-# Agent
-# ---------------------------------------------------------------------------
+NUM_KEYFRAMES = 2
 
 
 class GeneratorAgent:
-    """Agent 3 — generates all 32 frames for a room via Imagen 3."""
+    """Agent 3 — generates 2 Imagen 4 keyframes for a room."""
 
     def __init__(self) -> None:
         self.imagen = ImagenService()
         self.storage = StorageService()
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     async def generate_all_frames(
         self,
@@ -71,89 +33,128 @@ class GeneratorAgent:
         project_id: str,
         room_id: str,
         job_id: str,
+        reference_images: list[bytes] | None = None,
     ) -> list[FrameStatus]:
-        """Fire all 32 Imagen 3 calls concurrently (Semaphore-limited).
+        """Generate 2 keyframes.
 
-        Parameters
-        ----------
-        scene_plan:
-            The ScenePlan produced by Agent 2 (contains prompts, frame_types).
-        project_id:
-            Project identifier for GCS path construction.
-        room_id:
-            Room identifier for GCS path construction.
-        job_id:
-            Pipeline job identifier for event/logging context.
-
-        Returns
-        -------
-        list[FrameStatus]
-            One status entry per frame (32 total).
+        If reference_images provided, Gemini analyses them to build
+        a prompt that faithfully reproduces the room's design intent.
+        Otherwise falls back to the scene plan prompts.
         """
-        num_frames = len(scene_plan.prompts)
         logger.info(
-            "GeneratorAgent.generate_all_frames — project=%s, room=%s, job=%s, frames=%d",
-            project_id, room_id, job_id, num_frames,
+            "GeneratorAgent.generate_all_frames — project=%s, room=%s, refs=%d",
+            project_id, room_id, len(reference_images) if reference_images else 0,
         )
 
-        # Initialise frame statuses
-        frame_statuses: list[FrameStatus] = [
-            FrameStatus(
-                frame_idx=i,
-                frame_type=scene_plan.frame_types[i],
-                status="pending",
+        if reference_images:
+            prompts = await self._build_reference_grounded_prompts(
+                scene_plan=scene_plan,
+                reference_images=reference_images,
             )
-            for i in range(num_frames)
+        else:
+            # Fallback: use planner prompts (wide + midpoint shots)
+            planner_prompts = scene_plan.prompts
+            wide_idx = 0
+            detail_idx = min(len(planner_prompts) // 2, len(planner_prompts) - 1)
+            prompts = [planner_prompts[wide_idx], planner_prompts[detail_idx]]
+
+        frame_statuses: list[FrameStatus] = [
+            FrameStatus(frame_idx=i, frame_type="keyframe", status="pending")
+            for i in range(NUM_KEYFRAMES)
         ]
 
-        # Semaphore to limit concurrent Imagen calls
-        semaphore = asyncio.Semaphore(MAX_CONCURRENT_IMAGEN_CALLS)
+        # Always pass reference to each frame generation when available
+        ref_img = reference_images[0] if reference_images else None
 
-        # Fire all 32 tasks concurrently
         tasks = [
             self._generate_single_frame(
                 frame_idx=i,
-                prompt=scene_plan.prompts[i],
+                prompt=prompts[min(i, len(prompts) - 1)],
                 frame_status=frame_statuses[i],
                 project_id=project_id,
                 room_id=room_id,
-                semaphore=semaphore,
+                reference_image=ref_img,
             )
-            for i in range(num_frames)
+            for i in range(NUM_KEYFRAMES)
         ]
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Process results and handle any unexpected exceptions
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(
-                    "Frame %d raised unexpected exception: %s", i, result
-                )
-                frame_statuses[i].status = "failed"
-                frame_statuses[i].error_message = str(result)
-
-        # After Frame 0 completes: publish preview event
-        if frame_statuses[0].status == "complete" and frame_statuses[0].gcs_url:
-            preview_url = self.storage.get_signed_url(frame_statuses[0].gcs_url)
-            logger.info(
-                "Frame 0 preview ready — project=%s, room=%s, url=%s",
-                project_id, room_id, preview_url[:100],
-            )
-
-        # Summary logging
         complete_count = sum(1 for fs in frame_statuses if fs.status == "complete")
-        failed_count = sum(1 for fs in frame_statuses if fs.status == "failed")
-        logger.info(
-            "Generation complete — %d/%d succeeded, %d failed",
-            complete_count, num_frames, failed_count,
-        )
-
+        logger.info("Generation complete — %d/%d keyframes succeeded", complete_count, NUM_KEYFRAMES)
         return frame_statuses
 
-    # ------------------------------------------------------------------
-    # Single frame generation with retry
-    # ------------------------------------------------------------------
+    async def _build_reference_grounded_prompts(
+        self,
+        scene_plan,
+        reference_images: list[bytes],
+    ) -> list[str]:
+        """Use Gemini to analyse the reference renders and build precise Imagen prompts.
+
+        Returns 2 prompts:
+          [0] Wide overview matching the reference composition
+          [1] Detail/focal shot matching the reference furniture
+        """
+        from services.gemini import GeminiService
+        gemini = GeminiService()
+
+        room_label = getattr(scene_plan.room, "label", "room")
+        style_anchor = getattr(scene_plan, "style_anchor", "")
+
+        # Build furniture description from layout
+        layout = getattr(scene_plan, "furniture_layout", [])
+        furniture_names = [
+            item.get("item_name") or item.get("item_id", "")
+            for item in layout[:8]
+        ]
+        furniture_names = [n for n in furniture_names if n]
+        furniture_str = f"Furniture: {', '.join(furniture_names)}. " if furniture_names else ""
+
+        system_prompt = (
+            "You are a photorealistic interior visualization prompt engineer. "
+            "Analyse the provided reference render(s) of an interior space and describe "
+            "exactly what you see: room shape and proportions, floor material and color, "
+            "wall color and finish, ceiling height and lighting fixtures, every piece of "
+            "furniture (type, color, material, exact placement), decorative items, "
+            "window/door positions, and overall mood. Be extremely specific and precise."
+        )
+
+        user_prompt = (
+            f"This is a '{room_label}' space.\n"
+            f"{furniture_str}"
+            f"Style context: {style_anchor[:300]}\n\n"
+            "Generate TWO Imagen 4 prompts for this room:\n"
+            "1. A wide overview shot (same perspective as reference, full room visible)\n"
+            "2. A focused detail shot (key furniture arrangement, close-up composition)\n\n"
+            "Each prompt must be photorealistic, architecturally precise, and reproduce "
+            "EXACTLY the same room layout, furniture, colors, and materials as the reference. "
+            "Include: room dimensions feel, all visible furniture with colors/materials, "
+            "floor/wall/ceiling materials, lighting style, no people.\n\n"
+            'Respond ONLY with JSON: {"wide_prompt": "...", "detail_prompt": "..."}'
+        )
+
+        try:
+            result = await gemini.analyze_images_structured(
+                images=reference_images[:2],  # max 2 reference images
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+            wide_prompt = result.get("wide_prompt", "")
+            detail_prompt = result.get("detail_prompt", "")
+            if wide_prompt and detail_prompt:
+                logger.info(
+                    "Reference-grounded prompts generated (wide=%.80s...)", wide_prompt
+                )
+                return [wide_prompt, detail_prompt]
+        except Exception as exc:
+            logger.warning("Failed to build reference-grounded prompts: %s", exc)
+
+        # Fallback to planner prompts
+        planner_prompts = scene_plan.prompts
+        return [
+            planner_prompts[0],
+            planner_prompts[min(len(planner_prompts) // 2, len(planner_prompts) - 1)],
+        ]
 
     async def _generate_single_frame(
         self,
@@ -162,72 +163,32 @@ class GeneratorAgent:
         frame_status: FrameStatus,
         project_id: str,
         room_id: str,
-        semaphore: asyncio.Semaphore,
+        reference_image: bytes | None = None,
     ) -> None:
-        """Generate a single frame with retries and exponential backoff.
+        """Generate a single frame with retries and upload to storage.
 
-        Retry logic:
-        1. Up to MAX_REGENERATION_ATTEMPTS tries with exponential backoff.
-        2. On 3rd failure: soften prompt and retry once more.
-        3. Upload successful PNG to GCS.
+        If reference_image is provided, uses Gemini Flash Image (image-to-image)
+        which maintains visual consistency with the reference render.
+        Otherwise falls back to Imagen 4 text-to-image.
         """
-        async with semaphore:
-            frame_status.status = "generating"
-            gcs_path = GCS_PATH_FRAMES_RAW.format(
-                project_id=project_id, room_id=room_id, n=frame_idx
-            )
+        frame_status.status = "generating"
+        gcs_path = GCS_PATH_FRAMES_RAW.format(
+            project_id=project_id, room_id=room_id, n=frame_idx
+        )
 
-            logger.info(
-                "Generating frame %d (type=%s, prompt=%.80s...)",
-                frame_idx, frame_status.frame_type, prompt,
-            )
+        mode = "gemini-img2img" if reference_image else "imagen4-txt2img"
+        logger.info("Generating keyframe %d [%s] (prompt=%.100s...)", frame_idx, mode, prompt)
 
-            # --- Attempts 1 through MAX_REGENERATION_ATTEMPTS ---
-            last_error: Exception | None = None
-            for attempt in range(1, MAX_REGENERATION_ATTEMPTS + 1):
-                try:
-                    frame_status.attempts = attempt
-                    image_bytes = await self.imagen.generate_frame(prompt=prompt)
-
-                    # Upload to GCS
-                    await self.storage.upload_bytes(
-                        data=image_bytes,
-                        gcs_path=gcs_path,
-                        content_type="image/png",
-                    )
-
-                    frame_status.status = "complete"
-                    frame_status.gcs_url = gcs_path
-                    frame_status.completed_at = datetime.utcnow()
-
-                    logger.info(
-                        "Frame %d generated successfully (attempt %d) -> %s",
-                        frame_idx, attempt, gcs_path,
-                    )
-                    return
-
-                except Exception as exc:
-                    last_error = exc
-                    wait = 2.0 ** attempt
-                    logger.warning(
-                        "Frame %d attempt %d/%d failed: %s. Retrying in %.1fs...",
-                        frame_idx, attempt, MAX_REGENERATION_ATTEMPTS, exc, wait,
-                    )
-                    frame_status.status = "retrying"
-                    if attempt < MAX_REGENERATION_ATTEMPTS:
-                        await asyncio.sleep(wait)
-
-            # --- All standard attempts exhausted: soften prompt and try once more ---
-            logger.warning(
-                "Frame %d: all %d attempts failed. Trying softened prompt...",
-                frame_idx, MAX_REGENERATION_ATTEMPTS,
-            )
-
-            softened_prompt = _soften_prompt(prompt)
-            frame_status.attempts += 1
-
+        last_error: Exception | None = None
+        for attempt in range(1, MAX_REGENERATION_ATTEMPTS + 1):
             try:
-                image_bytes = await self.imagen.generate_frame(prompt=softened_prompt)
+                frame_status.attempts = attempt
+                image_bytes = await self.imagen.generate_frame_with_retry(
+                    prompt=prompt,
+                    reference_image=reference_image,
+                    reference_mime="image/jpeg",
+                    max_retries=1,  # outer loop handles retries
+                )
 
                 await self.storage.upload_bytes(
                     data=image_bytes,
@@ -240,18 +201,20 @@ class GeneratorAgent:
                 frame_status.completed_at = datetime.utcnow()
 
                 logger.info(
-                    "Frame %d generated with softened prompt -> %s",
-                    frame_idx, gcs_path,
+                    "Keyframe %d generated successfully (attempt %d) -> %s",
+                    frame_idx, attempt, gcs_path,
                 )
                 return
 
             except Exception as exc:
-                logger.error(
-                    "Frame %d: softened prompt also failed: %s. Marking as failed.",
-                    frame_idx, exc,
+                last_error = exc
+                wait = 2.0 ** attempt
+                logger.warning(
+                    "Keyframe %d attempt %d/%d failed: %s. Retrying in %.1fs...",
+                    frame_idx, attempt, MAX_REGENERATION_ATTEMPTS, exc, wait,
                 )
-                frame_status.status = "failed"
-                frame_status.error_message = (
-                    f"Failed after {MAX_REGENERATION_ATTEMPTS} attempts + 1 softened: "
-                    f"{last_error} / {exc}"
-                )
+                await asyncio.sleep(wait)
+
+        frame_status.status = "failed"
+        frame_status.error_message = str(last_error)
+        logger.error("Keyframe %d failed after %d attempts", frame_idx, MAX_REGENERATION_ATTEMPTS)

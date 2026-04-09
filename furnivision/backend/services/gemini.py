@@ -159,6 +159,85 @@ class GeminiService:
     # Rejection feedback interpretation
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Scene composition: floor plan + furniture catalogue → room description
+    # ------------------------------------------------------------------
+
+    async def compose_room_scene(
+        self,
+        floor_plan_bytes: bytes,
+        furniture_images: list[bytes],
+        room_label: str,
+        style_context: str = "",
+    ) -> str:
+        """Analyse a floor plan + per-room furniture catalogue images.
+
+        Returns a detailed free-text Imagen prompt describing the room with
+        exact furniture colours, materials, and placement positions inferred
+        from the floor plan layout.
+
+        Accepts up to 7 images: 1 floor plan + up to 6 furniture catalogue shots.
+        """
+        parts: list = [_image_part(floor_plan_bytes)]
+        for img_bytes in furniture_images[:6]:
+            parts.append(_image_part(img_bytes))
+
+        furniture_count = min(len(furniture_images), 6)
+        user_text = (
+            f"You are looking at:\n"
+            f"1. IMAGE 1 — a floor plan (top-down CAD view) of a commercial space. "
+            f"Find the '{room_label}' zone on this plan.\n"
+            f"2. IMAGES 2–{furniture_count + 1} — the EXACT furniture pieces assigned "
+            f"to the '{room_label}' room (product catalogue renders on white background).\n\n"
+            f"Use scale cues visible in the floor plan (standard door width ≈ 90 cm, "
+            f"desk ≈ 160 cm wide) to estimate the room's dimensions.\n\n"
+            f"Style context: {style_context or 'modern commercial interior'}\n\n"
+            f"Write a DETAILED PHOTOREALISTIC IMAGEN PROMPT (300-500 words) describing this "
+            f"room as it would appear in a high-quality 3D render. Include:\n"
+            f"• Room dimensions (width × depth × ceiling height estimated from the plan)\n"
+            f"• Floor material and colour (infer from style context)\n"
+            f"• Wall finish and colour\n"
+            f"• Every furniture piece shown in the catalogue images — EXACT colour, material, "
+            f"fabric texture, metal finish, and its position/orientation in the room as laid "
+            f"out on the floor plan\n"
+            f"• Natural light sources (window positions from plan) and artificial lighting\n"
+            f"• Camera: wide-angle entrance shot showing the full room\n\n"
+            f"Start the prompt with: "
+            f"'Photorealistic architectural interior render of a {room_label}, ...'\n"
+            f"Be extremely specific about furniture details — reference what you see in "
+            f"the catalogue images (e.g. 'terracotta boucle armchair with copper sled legs')."
+        )
+        parts.append({"text": user_text})
+
+        last_error: Exception | None = None
+        for attempt in range(1, 3):
+            try:
+                response = await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    lambda: self._model.generate_content(parts),
+                )
+                text = response.text.strip()
+                logger.info(
+                    "compose_room_scene '%s' attempt %d — %d chars",
+                    room_label, attempt, len(text),
+                )
+                return text
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "compose_room_scene attempt %d failed for '%s': %s",
+                    attempt, room_label, exc,
+                )
+
+        logger.warning("Falling back to generic description for '%s'", room_label)
+        return (
+            f"Photorealistic architectural interior render of a {room_label}. "
+            f"{style_context or 'Modern commercial interior, contemporary design'}. "
+            "Professional furniture arrangement with high-quality pieces, "
+            "warm natural lighting from windows, detailed textures and materials, "
+            "wide-angle shot showing the full room, no people, 4K quality."
+        )
+
     async def interpret_rejection_feedback(
         self, feedback: str, scene_plan: dict
     ) -> dict:

@@ -209,18 +209,24 @@ class ParserAgent:
         )
 
         # ------------------------------------------------------------------
-        # 1. Convert PDF pages to PNG at 300 DPI
+        # 1. Convert PDF pages to PNG at 300 DPI (or read image directly)
         # ------------------------------------------------------------------
-        logger.info("Step 1: Converting PDF to page images at 300 DPI")
-        page_images: list[bytes] = self.pdf_processor.convert_to_images(pdf_path, dpi=300)
-        logger.info("Rendered %d page image(s)", len(page_images))
+        logger.info("Step 1: Converting floor plan to page images")
+        _suffix = Path(pdf_path).suffix.lower()
+        if _suffix == ".pdf":
+            page_images: list[bytes] = self.pdf_processor.convert_to_images(pdf_path, dpi=300)
+            logger.info("Rendered %d page image(s)", len(page_images))
+            embedded_images: list[bytes] = self.pdf_processor.extract_embedded_images(pdf_path)
+            logger.info("Extracted %d embedded image(s)", len(embedded_images))
+        else:
+            # Image file (PNG, JPG, etc.) — read directly
+            page_images = [Path(pdf_path).read_bytes()]
+            embedded_images = []
+            logger.info("Loaded image file directly: %s", pdf_path)
 
         # ------------------------------------------------------------------
-        # 2. Extract embedded images from the PDF
+        # 2. (PDF only — handled above inline)
         # ------------------------------------------------------------------
-        logger.info("Step 2: Extracting embedded images from PDF")
-        embedded_images: list[bytes] = self.pdf_processor.extract_embedded_images(pdf_path)
-        logger.info("Extracted %d embedded image(s)", len(embedded_images))
 
         # ------------------------------------------------------------------
         # 3. Load furniture images as bytes
