@@ -624,7 +624,7 @@ async def _run_extraction(project_id: str, pptx_path: str) -> None:
             v5_rooms.append(V5Room(
                 id=room_data["id"],
                 label=room_data["label"],
-                floor=room_data.get("floor", "ground"),
+                floor=room_data.get("floor") or "ground",
                 status="extracted",
                 layout_image_path=room_data.get("layout_image_path", ""),
                 products=products,
