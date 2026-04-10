@@ -400,8 +400,8 @@ export async function approveRoomImage(
   return res.data;
 }
 
-export async function generateVideos(projectId: string): Promise<{ status: string; rooms_count: number }> {
-  const res = await api.post(`/v5/projects/${projectId}/generate-videos`);
+export async function generateVideos(projectId: string, videoMode: 'standard' | 'premium' = 'standard'): Promise<{ status: string; rooms_count: number; video_mode: string }> {
+  const res = await api.post(`/v5/projects/${projectId}/generate-videos`, { video_mode: videoMode });
   return res.data;
 }
 

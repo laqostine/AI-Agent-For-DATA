@@ -484,8 +484,12 @@ async def approve_room_image(project_id: str, room_id: str):
 # ---------------------------------------------------------------------------
 
 
+class GenerateVideosRequest(BaseModel):
+    video_mode: str = "standard"  # "standard" (MiniMax $0.27) or "premium" (Kling $0.49)
+
+
 @router.post("/{project_id}/generate-videos")
-async def generate_videos(project_id: str):
+async def generate_videos(project_id: str, body: GenerateVideosRequest | None = None):
     """Generate walkthrough videos for all approved rooms."""
     try:
         project = await _state.get_project(project_id)
@@ -496,10 +500,14 @@ async def generate_videos(project_id: str):
     if not approved_rooms:
         raise HTTPException(status_code=400, detail="No approved rooms to generate videos for")
 
+    video_mode = (body.video_mode if body else "standard")
+    if video_mode not in ("standard", "premium"):
+        raise HTTPException(status_code=400, detail="video_mode must be 'standard' or 'premium'")
+
     await _state.update_project(project_id, {"status": "generating_videos"})
 
     # Trigger video generation in background
-    task = asyncio.create_task(_run_video_generation(project_id))
+    task = asyncio.create_task(_run_video_generation(project_id, video_mode=video_mode))
     _BACKGROUND_TASKS[f"{project_id}_video"] = task
     task.add_done_callback(lambda t: _BACKGROUND_TASKS.pop(f"{project_id}_video", None))
 
@@ -507,6 +515,7 @@ async def generate_videos(project_id: str):
         "project_id": project_id,
         "status": "generating_videos",
         "rooms_count": len(approved_rooms),
+        "video_mode": video_mode,
     }
 
 
@@ -861,8 +870,8 @@ def _build_video_prompt(room_label: str, products: list | None = None) -> str:
     return prompt
 
 
-async def _run_video_generation(project_id: str) -> None:
-    """Generate Kling videos for all approved rooms."""
+async def _run_video_generation(project_id: str, video_mode: str = "standard") -> None:
+    """Generate videos for all approved rooms. mode: standard (MiniMax) or premium (Kling)."""
     try:
         project = await _state.get_project(project_id)
         approved_rooms = [r for r in project.v5_rooms if r.status == "image_approved"]
@@ -893,6 +902,7 @@ async def _run_video_generation(project_id: str) -> None:
                         prompt=prompt,
                         max_duration_seconds=5,
                         cfg_scale=0.4,
+                        video_mode=video_mode,
                     )
 
                     # Save video

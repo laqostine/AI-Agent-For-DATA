@@ -12,6 +12,7 @@ export default function ImageReview() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
+  const [videoMode, setVideoMode] = useState<'standard' | 'premium'>('standard');
   const isDemo = projectId === DEMO_ID;
 
   const { data: project, refetch } = useQuery({
@@ -22,7 +23,7 @@ export default function ImageReview() {
   });
 
   const genVideosMutation = useMutation({
-    mutationFn: () => isDemo ? Promise.resolve({ status: 'ok', rooms_count: 13 }) : generateVideos(projectId!),
+    mutationFn: () => isDemo ? Promise.resolve({ status: 'ok', rooms_count: 13, video_mode: 'standard' }) : generateVideos(projectId!, videoMode),
     onSuccess: () => navigate(`/video-preview/${projectId}`),
   });
 
@@ -97,12 +98,27 @@ export default function ImageReview() {
               </div>
             </div>
           </div>
-          <button onClick={() => genVideosMutation.mutate()} disabled={!allApproved || genVideosMutation.isPending}
-            className="btn-primary flex items-center gap-2 flex-shrink-0 text-xs sm:text-sm px-4 sm:px-6 py-2.5 sm:py-3">
-            {genVideosMutation.isPending ? 'Starting...' : <><span className="hidden sm:inline">Generate Videos</span><span className="sm:hidden">Videos</span></>}
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
-          </button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Video mode toggle */}
+            <div className="hidden sm:flex items-center bg-white/[0.03] rounded-xl p-0.5 border border-white/[0.06]">
+              <button onClick={() => setVideoMode('standard')}
+                className={cn('px-3 py-1.5 rounded-[10px] text-[10px] font-medium transition-all duration-200',
+                  videoMode === 'standard' ? 'bg-accent text-surface-950' : 'text-gray-600 hover:text-gray-400')}>
+                Standard
+              </button>
+              <button onClick={() => setVideoMode('premium')}
+                className={cn('px-3 py-1.5 rounded-[10px] text-[10px] font-medium transition-all duration-200',
+                  videoMode === 'premium' ? 'bg-accent text-surface-950' : 'text-gray-600 hover:text-gray-400')}>
+                Premium
+              </button>
+            </div>
+            <button onClick={() => genVideosMutation.mutate()} disabled={!allApproved || genVideosMutation.isPending}
+              className="btn-primary flex items-center gap-2 text-xs sm:text-sm px-4 sm:px-6 py-2.5 sm:py-3">
+              {genVideosMutation.isPending ? 'Starting...' : <><span className="hidden sm:inline">Generate Videos</span><span className="sm:hidden">Videos</span></>}
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+            </button>
+          </div>
         </div>
       </header>
 
