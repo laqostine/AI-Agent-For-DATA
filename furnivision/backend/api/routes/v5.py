@@ -871,7 +871,7 @@ def _build_video_prompt(room_label: str, products: list | None = None) -> str:
 
 
 async def _run_video_generation(project_id: str, video_mode: str = "standard") -> None:
-    """Generate videos for all approved rooms. mode: standard (MiniMax) or premium (Kling)."""
+    """Generate videos for approved rooms. mode: standard (MiniMax) or premium (Kling)."""
     try:
         project = await _state.get_project(project_id)
         approved_rooms = [r for r in project.v5_rooms if r.status == "image_approved"]
