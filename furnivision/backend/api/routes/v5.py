@@ -942,6 +942,11 @@ async def _run_video_generation(project_id: str, video_mode: str = "standard") -
         all_ready = bool(rooms_needing_video) and all(r.video_path for r in rooms_needing_video)
         if all_ready:
             logger.info("All videos ready for project %s", project_id)
+            await _state.update_project(project_id, {"status": "complete"})
+        else:
+            failed_rooms = [r for r in rooms_needing_video if not r.video_path]
+            logger.warning("Video gen incomplete for project %s: %d rooms missing video", project_id, len(failed_rooms))
+            await _state.update_project(project_id, {"status": "complete"})
 
     except Exception:
         logger.exception("Video generation failed for project %s", project_id)
