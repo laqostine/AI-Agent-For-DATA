@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class FurnitureItem(BaseModel):
@@ -81,6 +81,14 @@ class V5Room(BaseModel):
     id: str
     label: str
     floor: str = "ground"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_nulls(cls, data: dict) -> dict:
+        if isinstance(data, dict):
+            if not data.get("floor"):
+                data["floor"] = "ground"
+        return data
     status: Literal[
         "pending",
         "extracted",
