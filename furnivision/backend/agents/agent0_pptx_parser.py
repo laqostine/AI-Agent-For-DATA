@@ -201,35 +201,51 @@ class PPTXParserAgent:
                 image_parts.append(s.images[0])
                 image_slide_map.append(s.index)
 
+        total_slides = len(slides)
+        has_any_text = any(s.texts for s in slides)
+
         system_prompt = (
             "You are an expert at analyzing furniture specification PPTX documents. "
             "These documents describe room-by-room furniture layouts for commercial "
             "spaces like showrooms, offices, and dealerships.\n\n"
-            "The PPTX has this pattern:\n"
-            "- Room header slides: contain the room name (e.g. 'ACCUEIL', 'SALES LOUNGE', 'GM OFFICE')\n"
-            "  followed by product slides showing individual furniture pieces.\n"
-            "- Product slides: contain the product name (e.g. 'TASK CHAIR', 'DESK'), dimensions, and a product image.\n"
-            "- Floor plan slides: show overview layouts (e.g. 'GROUND FLOOR', 'Mezzanine Floor').\n"
-            "- Some slides may be title/intro slides to ignore.\n\n"
-            "You will receive slide text summaries and some representative images."
+            "Two PPTX patterns are supported:\n"
+            "PATTERN A (text-rich): Room header slides with room name in ALL CAPS "
+            "(e.g. 'ACCUEIL', 'GM OFFICE'), followed by product slides containing "
+            "product name + dimensions. Optional floor plan slides ('GROUND FLOOR', etc.).\n"
+            "PATTERN B (image-only): Slides have NO text, only product images. "
+            "In this case, infer the room visually from the products: group all images "
+            "as ONE room and label it based on what you see (e.g. 'Office', 'Living Room', "
+            "'Lounge'). Generate descriptive product names from the image content "
+            "(e.g. 'Executive Chair', 'Coffee Table', 'Floor Lamp').\n\n"
+            "You will receive slide text summaries AND the actual slide images. "
+            "Use the images to identify products visually when text is missing."
+        )
+
+        text_hint = (
+            "Slides have NO text — you MUST analyze the images visually to identify "
+            "products and infer the room type. Return at least one room with all "
+            "image-bearing slides as its products."
+            if not has_any_text
+            else "Use slide text for room/product names. Fall back to visual analysis if a slide has no text."
         )
 
         user_prompt = (
-            f"SLIDE SUMMARIES (64 slides):\n{json.dumps(summaries, indent=2)}\n\n"
+            f"SLIDE SUMMARIES ({total_slides} slides):\n{json.dumps(summaries, indent=2)}\n\n"
             f"IMAGE-TO-SLIDE MAP: Representative images are from slides {image_slide_map}\n\n"
+            f"TEXT AVAILABILITY: {text_hint}\n\n"
             "Analyze the slide structure and respond with JSON:\n"
             "{\n"
             '  "floor_plan_slides": [<slide indices showing floor plans/overviews>],\n'
             '  "rooms": [\n'
             "    {\n"
-            '      "label": "<room name>",\n'
+            '      "label": "<room name — from text if present, else inferred from images>",\n'
             '      "floor": "<ground or mezzanine>",\n'
-            '      "header_slide": <slide index of room header>,\n'
+            '      "header_slide": <slide index of room header, or first product slide if no header>,\n'
             '      "product_slides": [<slide indices of this room\'s products>],\n'
             '      "products": [\n'
             "        {\n"
-            '          "name": "<product name from slide text>",\n'
-            '          "dimensions": "<dimensions if mentioned, e.g. 200x90x110>",\n'
+            '          "name": "<product name from text, OR descriptive name from image (e.g. Executive Chair)>",\n'
+            '          "dimensions": "<dimensions if mentioned, else empty string>",\n'
             '          "slide_index": <which slide>\n'
             "        }\n"
             "      ]\n"
@@ -238,11 +254,12 @@ class PPTXParserAgent:
             '  "ignored_slides": [<title/intro/end slides to skip>]\n'
             "}\n\n"
             "IMPORTANT:\n"
-            "- Each product slide has exactly ONE product and ONE image\n"
-            "- Room header slides have the room name in ALL CAPS\n"
-            "- Products after a room header belong to that room until the next header\n"
-            "- Floor plan slides show 'GROUND FLOOR' or 'Mezzanine Floor'\n"
-            "- Include ALL products you can identify\n"
+            "- Each product slide typically has ONE product image\n"
+            "- Even if there are NO room headers and NO text, you MUST return at least one room "
+            "containing all product slides — invent a sensible room label based on the products shown\n"
+            "- Generate descriptive product names from the images when text is missing\n"
+            "- Include ALL slides with product-like images as products\n"
+            "- Floor plan slides show overview/architectural layouts (skip these as products)\n"
             "Respond ONLY with JSON. No extra text."
         )
 
