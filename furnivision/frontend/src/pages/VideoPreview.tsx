@@ -22,6 +22,8 @@ export default function VideoPreview() {
       const status = query.state.data?.status;
       return status === 'generating_videos' ? 5000 : false;
     },
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 
   const compileMutation = useMutation({

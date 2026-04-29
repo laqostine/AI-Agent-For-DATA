@@ -20,6 +20,8 @@ export default function ImageReview() {
     queryFn: () => isDemo ? getDemoProject() : getV5Project(projectId!),
     enabled: !!projectId,
     refetchInterval: isDemo ? false : 5000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 
   const genVideosMutation = useMutation({

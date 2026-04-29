@@ -23,6 +23,8 @@ export default function ExtractionReview() {
       const s = query.state.data?.status;
       return s === 'extracting' || s === 'uploading' ? 3000 : false;
     },
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 
   const isExtracting = !isDemo && (project?.status === 'extracting' || project?.status === 'uploading');
