@@ -79,9 +79,31 @@ class PPTXParserAgent:
         logger.info("Gemini classification: %d rooms",
                      len(classification.get("rooms", [])))
 
-        # Fallback: if Gemini returned 0 rooms but slides have images, build a single
-        # default room from all image-bearing slides. Handles text-less PPTX where
-        # Gemini ignores the "must return at least one room" instruction.
+        # Drop hallucinated rooms/products that reference slide indices outside the PPTX.
+        # Gemini sometimes copies example slide numbers from the system prompt verbatim.
+        n_slides = len(slides)
+        valid_rooms = []
+        for room in classification.get("rooms", []):
+            valid_products = [
+                p for p in room.get("products", [])
+                if 0 <= p.get("slide_index", -1) < n_slides
+                and slides[p["slide_index"]].images
+            ]
+            header = room.get("header_slide")
+            if header is not None and not (0 <= header < n_slides):
+                room["header_slide"] = valid_products[0]["slide_index"] if valid_products else None
+            if valid_products:
+                room["products"] = valid_products
+                valid_rooms.append(room)
+        if len(valid_rooms) != len(classification.get("rooms", [])):
+            logger.warning(
+                "Filtered hallucinated rooms: %d → %d (PPTX has %d slides)",
+                len(classification.get("rooms", [])), len(valid_rooms), n_slides,
+            )
+        classification["rooms"] = valid_rooms
+
+        # Fallback: if no valid rooms remain but slides have images, build a single
+        # default room from all image-bearing slides.
         if not classification.get("rooms"):
             image_slide_indices = [s.index for s in slides if s.images]
             if image_slide_indices:
