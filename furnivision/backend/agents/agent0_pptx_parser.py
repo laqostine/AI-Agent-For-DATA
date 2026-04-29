@@ -79,6 +79,35 @@ class PPTXParserAgent:
         logger.info("Gemini classification: %d rooms",
                      len(classification.get("rooms", [])))
 
+        # Fallback: if Gemini returned 0 rooms but slides have images, build a single
+        # default room from all image-bearing slides. Handles text-less PPTX where
+        # Gemini ignores the "must return at least one room" instruction.
+        if not classification.get("rooms"):
+            image_slide_indices = [s.index for s in slides if s.images]
+            if image_slide_indices:
+                logger.warning(
+                    "Gemini returned 0 rooms — applying fallback: %d image slides → 1 default room",
+                    len(image_slide_indices),
+                )
+                classification = {
+                    "floor_plan_slides": [],
+                    "rooms": [{
+                        "label": "Room 1",
+                        "floor": "ground",
+                        "header_slide": image_slide_indices[0],
+                        "product_slides": image_slide_indices,
+                        "products": [
+                            {
+                                "name": f"Product {i + 1}",
+                                "dimensions": "",
+                                "slide_index": idx,
+                            }
+                            for i, idx in enumerate(image_slide_indices)
+                        ],
+                    }],
+                    "ignored_slides": [],
+                }
+
         # Step 4: Save images and build result
         result = self._build_result(slides, classification, output_dir, project_id)
 
